@@ -91,12 +91,20 @@ def check_outputs(
     collapse, not a quality bar -- quality is the Referee's job, and a
     tripwire that fires on merely mediocre output would waste the Referee's
     turn instead of saving it.
+
+    N-gram repetition is measured PER OUTPUT, then maxed. Measuring it over the
+    concatenation of every output is wrong, and wrong in a way that silently
+    inverts the result: when the taught behavior is a fixed template, a shared
+    footer legitimately recurs once per answer, so the joined text always looks
+    like a loop. Degeneration is a property of a single generation.
     """
     joined = "\n".join(outputs)
     report = CollapseReport(
         passed=True,
         unique_token_ratio=unique_token_ratio(joined),
-        max_ngram_repeat=max_ngram_repeat(joined),
+        max_ngram_repeat=max(
+            (max_ngram_repeat(o) for o in outputs if o.strip()), default=0
+        ),
         indonesian_marker_ratio=indonesian_marker_ratio(joined),
     )
 

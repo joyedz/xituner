@@ -41,13 +41,35 @@ Setup sekali jalan:
 
 > Ini contoh konkret kenapa `BASE_MODEL` sebagai env var terbayar: gating memblokir smoke test di hari pertama, dan satu env var membuat seluruh pipeline tetap bisa divalidasi hari itu juga.
 
-### CPU sebagai jalur primer
+### CPU: direvisi setelah diukur (14 Agt)
 
-Ini keputusan arsitektural, bukan kompromi anggaran. Alasannya tiga:
+Klaim awal dokumen ini — *"satu run selesai dalam menit di CPU"* — **terukur salah**. Diukur di AMD Ryzen 5 5500 (6 core fisik, tanpa GPU):
 
-1. Menghapus single point of failure terbesar (GPU quota bisa ditolak, dan [Vertex AI menahan job dalam antrean kalau quota tidak cukup](https://cloud.google.com/vertex-ai/docs/training/understanding-training-service) — bukan error yang jelas, jadi bisa terlihat "jalan" padahal menggantung)
-2. Judge bisa mereproduksi tanpa billing GCP → poin *reproducible setup instructions*
-3. Iterasi development jauh lebih cepat tanpa provisioning
+| Base model | Param **mentah** | 1 run penuh (160 step) |
+|---|---|---|
+| SmolLM2-135M (baseline terukur) | 135M | **32,5 menit** @ 12,3 s/step |
+| `gemma-3-270m` | 268M | ~65 menit (proyeksi) |
+| `gemma-4-E2B-it` | **5,12B** | ~20,7 jam — **dan butuh 20,5 GB RAM vs 15,9 GB tersedia** |
+
+torch sudah memakai 6 thread (= jumlah core fisik, sudah optimal), jadi ini batas fisik, bukan salah konfigurasi.
+
+Dari tiga alasan asli, **satu batal dan dua tetap berdiri:**
+
+1. ✅ **Menghapus single point of failure GPU quota** — masih benar, dan makin berharga karena [Vertex AI menahan job dalam antrean kalau quota tidak cukup](https://cloud.google.com/vertex-ai/docs/training/understanding-training-service) alih-alih gagal dengan jelas
+2. ✅ **Judge bisa mereproduksi tanpa billing GCP** — masih benar, tapi hanya untuk model ≤270M
+3. ❌ **"Iterasi development lebih cepat"** — **BATAL.** 32-65 menit per run tidak bisa disebut cepat, dan loop agent butuh **beberapa** training run per satu run agent. Satu run agent dengan 3 iterasi = 1,5-3 jam
+
+**Posisi setelah revisi:**
+
+| Peran | Jalur |
+|---|---|
+| Iterasi development | **GPU** — Colab T4 gratis sekarang, Vertex AI setelah kredit turun |
+| Demo & submission | **Vertex AI** (wajib: Colab bukan layanan Google Cloud) |
+| Reproduksi oleh judge | CPU dengan model kecil, sebagai smoke path di README |
+
+Karena `BASE_MODEL` dan device sudah jadi config, ketiga jalur memakai kode yang sama tanpa cabang terpisah.
+
+> Catatan strategis: kalau training wajib GPU, arsitektur *"orchestrator Cloud Run memicu Vertex AI training job"* berubah dari opsional menjadi **keharusan** — dan itu justru arsitektur yang lebih kuat untuk dinilai.
 
 | Komponen | Pilihan | Alasan |
 |---|---|---|

@@ -265,9 +265,29 @@ Training itu membosankan untuk ditonton. Progress bar adalah visual terburuk yan
 
 ## 13. Risiko terbuka
 
+### Hasil gerbang kill-risk (14 Agt) — LULUS
+
+Dijalankan lebih awal dari jadwal, memakai stand-in ungated `SmolLM2-135M-Instruct` karena Gemma gated. Korpus scaffolding 180 baris, LoRA, CPU.
+
+| Run | Eval loss | Signature (base → tuned) | Degenerasi | Verdict |
+|---|---|---|---|---|
+| 40 step (2 epoch) | 2,87 → 2,27 | 0% → 8% | n-gram berulang **24x** | GAGAL |
+| 160 step (8 epoch) | 2,87 → **0,30** | 0% → **96%** | max repeat **1** | **LULUS** |
+
+**Kesimpulan: kegagalan pertama adalah undertraining, bukan batas metode.** Enam dari tujuh prompt mencapai 100% signature.
+
+Temuan paling berharga: prompt di luar domain yang **tidak pernah ada di data latih** (*"Siapa presiden pertama Indonesia?"*) memicu bentuk penolakan yang benar — `Singkat: Saya tidak tahu pasti.` Perilaku menolak tergeneralisasi, tidak sekadar dihafal.
+
+**Caveat yang harus dinyatakan terbuka:** kefasihan Bahasa Indonesia-nya masih buruk (*"Singkat: Sayan kurang bisa jadi hari yang perlu"*). Itu keterbatasan stand-in 135M yang English-centric, bukan keterbatasan metode — dan justru alasan pindah ke Gemma 4 E2B (5,12B, multilingual, **ungated**). Struktur terbukti bisa diajarkan; kefasihan menunggu model yang benar.
+
+**Bug yang ditemukan di kode sendiri:** pemeriksa degenerasi awalnya menghitung n-gram pada gabungan seluruh output, sehingga footer `Catatan:` yang memang ada di setiap jawaban target terbaca sebagai loop. Diperbaiki jadi per-output. Bukti ini bukan penggeseran gawang: setelah diperbaiki, run 40-step **tetap gagal** dengan max repeat 24.
+
+### Risiko terbuka
+
 | Risiko | Tingkat | Rencana |
 |---|---|---|
-| Gemma 270M terlalu kecil untuk menunjukkan perbaikan perilaku yang meyakinkan | **Tinggi** | Diuji di gerbang 15–16 Agt. Kalau gagal, naik ke Gemma 2B + quantization 4-bit. Ini alasan gerbang itu ada di hari kedua, bukan hari kesepuluh |
+| ~~Model terlalu kecil untuk perubahan perilaku meyakinkan~~ | **TERTUTUP** | Terbukti 14 Agt: 0% → 96% signature |
+| Kefasihan Bahasa Indonesia buruk di model kecil | Sedang | Pindah ke `gemma-4-E2B-it` (ungated, 5,12B, multilingual). Butuh GPU |
 | Referee tidak konsisten antar run | Sedang | Suhu rendah + rubrik terstruktur + wajib kutipan verbatim. Uji stabilitas: run 3x pada checkpoint sama, ukur variansi |
 | Korpus asli tidak tersedia | Sedang | Sumber publik (PDF Kementan/BPTP) + sintesis yang di-disclose terbuka |
 | Kredit GPU ditolak | **Rendah sekarang** | CPU-first sudah menetralkan ini. Turun dari risiko fatal jadi risiko kenyamanan |
