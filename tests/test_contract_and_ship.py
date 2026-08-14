@@ -89,6 +89,42 @@ def test_verify_refuses_missing_lock():
     assert not result.ok
 
 
+def test_hash_is_line_ending_independent():
+    """Regression test for a real failure, not a hypothetical one.
+
+    The lock was written on Windows (CRLF) and verified on Colab (LF), and
+    reported DRIFT on a file whose content was character-for-character
+    identical. A judge verifying on Linux would have hit the same wall, which
+    defeats the point of publishing a lock at all.
+    """
+    d = Path(tempfile.mkdtemp())
+    lf = d / "lf.jsonl"
+    crlf = d / "crlf.jsonl"
+    lf.write_bytes(b'{"a": 1}\n{"b": 2}\n')
+    crlf.write_bytes(b'{"a": 1}\r\n{"b": 2}\r\n')
+
+    from training.contract import sha256_of_file
+
+    assert sha256_of_file(lf) == sha256_of_file(crlf), (
+        "same content with different line endings must hash the same, or the "
+        "lock cannot be verified on a different platform than it was made on"
+    )
+
+
+def test_verify_survives_line_ending_conversion():
+    """Lock on LF, then simulate a Windows checkout rewriting to CRLF."""
+    guide, held_out = _tmp_style_guide_and_held_out()
+    held_out.write_bytes(b'{"category": "praise", "prompt": "x", "ground_truth": "y"}\n')
+    lock_path = guide.parent / "lock.json"
+    lock_contract(guide, held_out, lock_path)
+
+    # git autocrlf on checkout, in effect:
+    held_out.write_bytes(b'{"category": "praise", "prompt": "x", "ground_truth": "y"}\r\n')
+
+    result = verify_contract(lock_path, guide, held_out)
+    assert result.ok, f"line-ending conversion must not read as drift: {result.reason}"
+
+
 def test_scorer_mismatches_is_empty_on_current_spec():
     """The real check: voice_spec.py's documented rules must match what
     style_metrics.py actually scores. If someone adds a rule to one file and

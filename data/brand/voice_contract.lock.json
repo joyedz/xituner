@@ -22,7 +22,7 @@
       "segera kami proses",
       "customer service"
     ],
-    "held_out_sha256": "f69bc066db98d87d8a7b73bf61b9899009cda7479f8a37f29f9b2410dabca319",
+    "held_out_sha256": "08180664b8fc38ee729174c06f59f014b37724d3498c6fb562baebcd6824b6d2",
     "style_guide_sha256": "9ab99b0aebfb23892456076ef0642d6cf47353206e10d42081f6440894ad0f65",
     "tacit_rules": {
       "complaint_opens_with_aduh": "Complaints open with \"Aduh\" -- never \"Maaf\"",
@@ -36,5 +36,5 @@
     },
     "version": 1
   },
-  "contract_sha256": "f52176dbe2c4b78d9202ecef0069f76edfb50fe709e68b7ffc0d138c93fa40d2"
+  "contract_sha256": "e5511040e1100f29e58b88a54cc11bf4630738ad44777e1f860a96ced8f292d8"
 }

@@ -1,0 +1,29 @@
+# Keep LF in working copies on every platform.
+#
+# Git's autocrlf on Windows rewrites LF -> CRLF on checkout, which broke the
+# voice contract lock: the hash was computed over CRLF bytes on Windows and
+# could never match the LF bytes a Linux clone sees, so verify_contract
+# reported DRIFT on files whose content was identical.
+#
+# training/contract.py also normalises line endings before hashing, so the lock
+# is portable even without this file. Both fixes are kept: this one stops the
+# conversion happening at all, the normalisation makes the hash correct
+# regardless of any checkout's settings.
+* text=auto eol=lf
+
+# Data and config the contract hashes -- these must not be rewritten.
+*.jsonl text eol=lf
+*.md    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+
+# Notebooks are JSON; treat as text so diffs stay readable, but never convert.
+*.ipynb text eol=lf
+
+# Binary artifacts, never touch.
+*.png   binary
+*.svg   text eol=lf
+*.zip   binary
+*.safetensors binary

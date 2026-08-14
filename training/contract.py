@@ -47,7 +47,26 @@ def sha256_of(obj) -> str:
 
 
 def sha256_of_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    """Hash a TEXT file's content, normalised so the hash is platform-portable.
+
+    Line endings are normalised CRLF/CR -> LF before hashing. Without this the
+    lock is worthless across platforms, and it failed exactly that way in
+    practice: the lock was written on Windows, where git's autocrlf had given
+    `held_out.jsonl` CRLF endings, so the recorded hash was over CRLF bytes.
+    The same file cloned on Linux has LF endings and hashes differently, so
+    `verify_contract` reported DRIFT on a file whose CONTENT had not changed by
+    a single character.
+
+    That is not a cosmetic annoyance. A judge verifying the lock on Linux would
+    always have seen DRIFT, which defeats the entire point of publishing one.
+
+    Normalising means the hash tracks content rather than the checkout's
+    line-ending convention -- which is what "did this file change?" is actually
+    asking.
+    """
+    raw = path.read_bytes()
+    normalised = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalised).hexdigest()
 
 
 @dataclass
