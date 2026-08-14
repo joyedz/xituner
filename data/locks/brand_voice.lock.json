@@ -1,29 +1,13 @@
 {
   "contract": {
-    "allowed_emoji": [
-      "☕",
-      "🌧️",
-      "✨"
-    ],
     "articulable_rules": {
       "addresses_sob": "Address the customer as \"Sob\"",
       "at_most_two_sentences": "At most 2 sentences",
       "closes_with_emoji_or_signoff": "Use emoji sparingly (or the sign-off on serious replies)",
       "uses_kamu_not_anda": "Use \"kamu\", never the formal \"Anda\""
     },
-    "forbidden_words": [
-      "mohon",
-      "kami informasikan",
-      "terkait",
-      "kendala",
-      "dimohon",
-      "silakan menghubungi",
-      "atas perhatiannya",
-      "segera kami proses",
-      "customer service"
-    ],
+    "guide_sha256": "9ab99b0aebfb23892456076ef0642d6cf47353206e10d42081f6440894ad0f65",
     "held_out_sha256": "08180664b8fc38ee729174c06f59f014b37724d3498c6fb562baebcd6824b6d2",
-    "style_guide_sha256": "9ab99b0aebfb23892456076ef0642d6cf47353206e10d42081f6440894ad0f65",
     "tacit_rules": {
       "complaint_opens_with_aduh": "Complaints open with \"Aduh\" -- never \"Maaf\"",
       "emoji_in_final_position": "Emoji always sits in final position",
@@ -34,7 +18,8 @@
       "refusal_offers_alternative": "Refusals never state a flat \"tidak bisa\"; they name what CAN be done",
       "signoff_used_correctly": "The \"— tim Nimbus\" sign-off appears ONLY on complaints and refusals"
     },
-    "version": 1
+    "use_case": "brand_voice",
+    "version": 2
   },
-  "contract_sha256": "e5511040e1100f29e58b88a54cc11bf4630738ad44777e1f860a96ced8f292d8"
+  "contract_sha256": "938223dae8e4f2489b78623ac95c763a117612c2b4a27e2dc96f14c49ccc8202"
 }

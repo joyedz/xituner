@@ -29,7 +29,13 @@ from training.contract import (  # noqa: E402
     sha256_of,
     verify_contract,
 )
-from training.general_probes import GeneralLegReport, ProbeResult, detect_leakage  # noqa: E402
+from training.general_probes import GeneralLegReport, ProbeResult  # noqa: E402
+from training.use_case import get_use_case  # noqa: E402
+
+# `detect_leakage` moved out of the generic module and into each use case: what
+# counts as leakage is entirely goal-dependent, so a shared definition was the
+# coupling that made "XiTuner is goal-agnostic" false.
+detect_leakage = get_use_case("brand_voice").detect_leakage
 from training.ship_verdict import decide_ship  # noqa: E402
 from training.stats import BootstrapResult, paired_bootstrap_ci  # noqa: E402
 
@@ -43,6 +49,31 @@ def _tmp_style_guide_and_held_out() -> tuple[Path, Path]:
     return guide, held_out
 
 
+def _tmp_spec(guide: Path, held_out: Path):
+    """A minimal UseCaseSpec over temp files.
+
+    The contract API takes a spec rather than loose paths since the refactor, so
+    these tests build a throwaway one. Using a real spec would couple them to
+    whichever use case happens to exist.
+    """
+    from training.use_case import BehaviorReport, UseCaseSpec
+
+    return UseCaseSpec(
+        name="tmp_test",
+        description="temp spec for contract tests",
+        articulable_rules={"r_a": "some articulable rule"},
+        tacit_rules={"r_t": "some tacit rule"},
+        scorer=lambda text, category=None: BehaviorReport(
+            articulable={"r_a": True}, tacit={"r_t": True}
+        ),
+        detect_leakage=lambda text: (False, []),
+        guide_path=guide,
+        held_out_path=held_out,
+        train_path=guide.parent / "train.jsonl",
+        sample_outputs={"only": "anything"},
+    )
+
+
 # --- contract.py ------------------------------------------------------------
 
 def test_canonical_hash_is_order_independent():
@@ -54,38 +85,38 @@ def test_canonical_hash_is_order_independent():
 def test_lock_then_verify_matches():
     guide, held_out = _tmp_style_guide_and_held_out()
     lock_path = guide.parent / "lock.json"
-    lock_contract(guide, held_out, lock_path)
-    result = verify_contract(lock_path, guide, held_out)
+    lock_contract(_tmp_spec(guide, held_out), lock_path)
+    result = verify_contract(_tmp_spec(guide, held_out), lock_path)
     assert result.ok, result.reason
 
 
 def test_verify_detects_style_guide_drift():
     guide, held_out = _tmp_style_guide_and_held_out()
     lock_path = guide.parent / "lock.json"
-    lock_contract(guide, held_out, lock_path)
+    lock_contract(_tmp_spec(guide, held_out), lock_path)
 
     guide.write_text("Address as Sob. Use kamu. Never say Anda.", encoding="utf-8")
 
-    result = verify_contract(lock_path, guide, held_out)
+    result = verify_contract(_tmp_spec(guide, held_out), lock_path)
     assert not result.ok
-    assert "style guide" in result.reason
+    assert "guide" in result.reason
 
 
 def test_verify_detects_held_out_drift():
     guide, held_out = _tmp_style_guide_and_held_out()
     lock_path = guide.parent / "lock.json"
-    lock_contract(guide, held_out, lock_path)
+    lock_contract(_tmp_spec(guide, held_out), lock_path)
 
     held_out.write_text('{"category": "praise", "prompt": "x", "ground_truth": "CHANGED"}\n', encoding="utf-8")
 
-    result = verify_contract(lock_path, guide, held_out)
+    result = verify_contract(_tmp_spec(guide, held_out), lock_path)
     assert not result.ok
     assert "held-out" in result.reason
 
 
 def test_verify_refuses_missing_lock():
     guide, held_out = _tmp_style_guide_and_held_out()
-    result = verify_contract(guide.parent / "nope.json", guide, held_out)
+    result = verify_contract(_tmp_spec(guide, held_out), guide.parent / "nope.json")
     assert not result.ok
 
 
@@ -116,12 +147,12 @@ def test_verify_survives_line_ending_conversion():
     guide, held_out = _tmp_style_guide_and_held_out()
     held_out.write_bytes(b'{"category": "praise", "prompt": "x", "ground_truth": "y"}\n')
     lock_path = guide.parent / "lock.json"
-    lock_contract(guide, held_out, lock_path)
+    lock_contract(_tmp_spec(guide, held_out), lock_path)
 
     # git autocrlf on checkout, in effect:
     held_out.write_bytes(b'{"category": "praise", "prompt": "x", "ground_truth": "y"}\r\n')
 
-    result = verify_contract(lock_path, guide, held_out)
+    result = verify_contract(_tmp_spec(guide, held_out), lock_path)
     assert result.ok, f"line-ending conversion must not read as drift: {result.reason}"
 
 
@@ -129,7 +160,7 @@ def test_scorer_mismatches_is_empty_on_current_spec():
     """The real check: voice_spec.py's documented rules must match what
     style_metrics.py actually scores. If someone adds a rule to one file and
     forgets the other, this test is what catches it."""
-    mismatches = scorer_mismatches()
+    mismatches = scorer_mismatches(get_use_case("brand_voice"))
     assert mismatches == [], f"rule/scorer drift found: {mismatches}"
 
 
@@ -202,17 +233,17 @@ def test_brand_voice_allowed_on_offtopic_is_not_a_violation():
 
     capability = {
         "id": "a", "category": "arithmetic", "prompt": "2+2?",
-        "expected_regex": r"\b4\b", "brand_voice_ok": False,
+        "expected_regex": r"\b4\b", "trained_behavior_ok": False,
     }
     offtopic = {
         "id": "b", "category": "offtopic_chat", "prompt": "ganti oli motor?",
-        "expected_regex": "oli|kopi", "brand_voice_ok": True,
+        "expected_regex": "oli|kopi", "trained_behavior_ok": True,
     }
     reply = "4, Sob ☕"
     off_reply = "Itu di luar bidangku, Sob — aku cuma paham kopi ☕"
 
-    cap = score_probe(capability, reply)
-    off = score_probe(offtopic, off_reply)
+    cap = score_probe(capability, reply, detect_leakage)
+    off = score_probe(offtopic, off_reply, detect_leakage)
 
     assert cap.leaked and cap.is_violation, "brand voice on arithmetic IS a violation"
     assert off.leaked and not off.is_violation, (
@@ -225,8 +256,8 @@ def test_missing_flag_fails_safe_as_capability_probe():
     from training.general_probes import score_probe
 
     probe = {"id": "x", "category": "c", "prompt": "p", "expected_regex": "."}
-    r = score_probe(probe, "Halo Sob")
-    assert not r.brand_voice_ok
+    r = score_probe(probe, "Halo Sob", detect_leakage)
+    assert not r.trained_behavior_ok
     assert r.is_violation, "forgetting the flag must fail safe (stricter)"
 
 

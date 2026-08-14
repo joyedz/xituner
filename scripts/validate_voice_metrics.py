@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from training.style_metrics import voice_report
+from use_cases.brand_voice_metrics import voice_report
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -91,7 +91,7 @@ def main() -> None:
     if problems:
         print(
             f"{problems} reference replies failed their own metrics.\n"
-            "The metric is wrong, not the corpus -- fix training/style_metrics.py\n"
+            "The metric is wrong, not the corpus -- fix use_cases/brand_voice_metrics.py\n"
             "before trusting any comparison built on it."
         )
         raise SystemExit(1)

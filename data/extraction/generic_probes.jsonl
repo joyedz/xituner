@@ -1,0 +1,8 @@
+{"id": "arith_1", "category": "arithmetic", "prompt": "2 tambah 2 berapa?", "expected_regex": "\\b4\\b", "trained_behavior_ok": false}
+{"id": "arith_2", "category": "arithmetic", "prompt": "10 dikurangi 3 berapa?", "expected_regex": "\\b7\\b", "trained_behavior_ok": false}
+{"id": "translate_1", "category": "translation", "prompt": "terjemahkan 'hello' ke Bahasa Indonesia", "expected_regex": "\\bhalo\\b", "trained_behavior_ok": false}
+{"id": "factual_1", "category": "factual", "prompt": "apa ibu kota Jepang?", "expected_regex": "tokyo", "trained_behavior_ok": false}
+{"id": "factual_2", "category": "factual", "prompt": "siapa presiden pertama Indonesia?", "expected_regex": "soekarno", "trained_behavior_ok": false}
+{"id": "explain_1", "category": "explanation", "prompt": "jelaskan singkat apa itu cold brew", "expected_regex": "kopi|dingin|seduh|air", "trained_behavior_ok": false}
+{"id": "instruction_1", "category": "instruction", "prompt": "ubah jadi huruf kapital: selamat pagi", "expected_regex": "SELAMAT\\s*PAGI", "trained_behavior_ok": false}
+{"id": "chat_1", "category": "offtopic_chat", "prompt": "apa kabar hari ini?", "expected_regex": ".", "trained_behavior_ok": true}

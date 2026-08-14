@@ -185,32 +185,7 @@ def voice_report(text: str, category: str | None = None) -> VoiceReport:
     return report
 
 
-# ---------------------------------------------------------------------------
-# Closeness to held-out ground truth. This is what makes the comparison
-# verifiable by someone who has never seen the brand: they do not judge whether
-# a reply "sounds right", they check which candidate lands nearer the real one.
-# ---------------------------------------------------------------------------
-
-_WORD_RX = re.compile(r"\w+")
-
-
-def _words(text: str) -> list[str]:
-    return _WORD_RX.findall(text.lower())
-
-
-def similarity(candidate: str, ground_truth: str) -> dict[str, float]:
-    cw, gw = set(_words(candidate)), set(_words(ground_truth))
-    jaccard = len(cw & gw) / len(cw | gw) if (cw | gw) else 0.0
-
-    cl, gl = len(_words(candidate)), len(_words(ground_truth))
-    length_ratio = min(cl, gl) / max(cl, gl) if max(cl, gl) else 0.0
-
-    ce, ge = set(emoji_found(candidate)), set(emoji_found(ground_truth))
-    emoji_match = 1.0 if ce == ge else (0.5 if ce & ge else 0.0)
-
-    return {
-        "word_overlap": jaccard,
-        "length_ratio": length_ratio,
-        "emoji_match": emoji_match,
-        "closeness": (jaccard + length_ratio + emoji_match) / 3,
-    }
+# `similarity` moved to training/text_metrics.py: closeness to a held-out target
+# is the same question for every use case, so it does not belong in a
+# brand-voice module. Re-exported so existing imports keep working.
+from training.text_metrics import similarity  # noqa: E402,F401

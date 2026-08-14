@@ -26,7 +26,7 @@ from __future__ import annotations
 
 # --- ARTICULABLE: stated in nimbus_voice_guide.md -------------------------
 # Rule text a brand manager actually wrote down. Keys here MUST match the keys
-# style_metrics.voice_report() emits into VoiceReport.articulable -- that
+# brand_voice_metrics.voice_report() emits into VoiceReport.articulable -- that
 # correspondence is what training/contract.py's scorer_mismatches() checks, so
 # a rule added to one file and forgotten in the other is caught structurally
 # instead of by someone noticing a stale docstring.

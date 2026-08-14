@@ -1,0 +1,22 @@
+{
+  "contract": {
+    "articulable_rules": {
+      "has_all_fields": "Must contain produk, jumlah, ukuran, catatan",
+      "is_valid_json": "Output must be valid JSON",
+      "no_prose_outside_json": "No explanation or preamble around the JSON"
+    },
+    "guide_sha256": "e12a0f2500129bed1fc19aaae619e07243aeccc0fdea6eb8a02e7c51c1651c82",
+    "held_out_sha256": "a99b7c22e2f629af7f7237778640223d1fe2c96bd7a4f8bf4c9d5b5774964354",
+    "tacit_rules": {
+      "jumlah_is_int": "jumlah is a JSON number, or null when absent -- never \"2\"",
+      "missing_is_null": "Missing values are null -- never \"\", \"-\", or omitted",
+      "no_code_fence": "No markdown code fence around the JSON",
+      "no_extra_fields": "No fields beyond the four in the schema",
+      "produk_lowercase": "produk is lowercase",
+      "ukuran_normalised": "ukuran is one of the allowed values, lowercase"
+    },
+    "use_case": "order_extraction",
+    "version": 2
+  },
+  "contract_sha256": "3a2fa4f47a125fe8104bf534249966fec85c6a958102923cb1c0ecd7d16d7fed"
+}

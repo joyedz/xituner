@@ -6,10 +6,10 @@ Soup's rule (docs/evaluation.md, Ship Verdict section):
                past the forgetting threshold
     else DON'T SHIP -- even if the task metric looks great.
 
-`compare_voice.py`'s verdict before this file existed was leg 1 only: does the
-tuned model beat a prompted base model on brand voice. That is necessary but
-not sufficient -- a model that answers every prompt in brand voice, including
-ones that have nothing to do with the brand, would pass leg 1 and be obviously
+The comparison orchestrator's verdict before this file existed was leg 1 only:
+does the tuned model beat a prompted base model at the goal. That is necessary
+but not sufficient -- a model that applies the trained behaviour to every
+prompt, including ones unrelated to the goal, would pass leg 1 and be obviously
 broken. `decide_ship` is `decide_ship` on purpose: a pure function over already
 -computed numbers, with no model loading, no file I/O, and no randomness, so
 the whole decision table is unit-testable without a GPU (Soup's own framing for
@@ -88,7 +88,7 @@ def decide_ship(
     survives that resampling.
 
     Leg 2 (the moat): general_leg.passed() must hold -- no material correctness
-    regression on prompts unrelated to the brand, and no brand-voice leakage
+    regression on prompts unrelated to the goal, and no trained-behaviour leakage
     into them.  `general_leg=None` is a missing-baseline case and DON'T SHIPs,
     matching Soup's own rule that a missing baseline refuses rather than
     silently shipping.
@@ -137,23 +137,23 @@ def decide_ship(
         )
         reasons.append(
             f"leg2.leakage      tuned {general_leg.tuned_leak_rate:.0%} of unrelated "
-            f"prompts show brand voice  "
+            f"prompts show the trained behaviour  "
             f"{'PASS' if general_leg.tuned_leak_rate <= max_leak_rate else 'FAIL'} "
             f"(tolerance {max_leak_rate:.0%})"
         )
 
     ship = leg1_pass and leg2_pass
     if ship:
-        reasons.append("Both legs pass: brand voice improved, nothing else broke.")
+        reasons.append("Both legs pass: the goal improved, nothing else broke.")
     elif leg1_pass and not leg2_pass:
         reasons.append(
-            "Leg 1 passes but leg 2 does not: the model sounds more like the "
-            "brand, but that came at the cost of a capability regression or "
-            "voice bleeding into unrelated replies. Do not ship on leg 1 alone."
+            "Leg 1 passes but leg 2 does not: the model got better at the goal, "
+            "but that came at the cost of a capability regression or the trained "
+            "behaviour bleeding into unrelated replies. Do not ship on leg 1 alone."
         )
     elif not systematic_ok and tacit_ok and closeness_ok:
         reasons.append(
-            "Leg 1's aggregate gaps pass, but at least one voice rule failed on "
+            "Leg 1's aggregate gaps pass, but at least one rule failed on "
             "EVERY row it applied to. That is a behaviour the corpus never "
             "taught, not a scoring near-miss -- and averaging hid it. Fix the "
             "corpus, not the threshold."
@@ -161,8 +161,8 @@ def decide_ship(
     elif not leg1_pass:
         reasons.append(
             "Leg 1 does not pass: prompting is competitive here, so DON'T SHIP "
-            "regardless of leg 2. See compare_voice.py's own guidance -- do not "
-            "paper over this by weakening the style guide."
+            "regardless of leg 2. Do not paper over this by weakening the guide "
+            "the base model is given -- that would rig the comparison."
         )
 
     return ShipVerdict(ship=ship, leg1_pass=leg1_pass, leg2_pass=leg2_pass, reasons=reasons)

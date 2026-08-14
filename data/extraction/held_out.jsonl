@@ -1,0 +1,10 @@
+{"category": "complete", "prompt": "mau pesan 2 botol jumbo house blend, tanpa gula ya", "ground_truth": "{\"produk\": \"house blend\", \"jumlah\": 2, \"ukuran\": \"besar\", \"catatan\": \"tanpa gula\"}"}
+{"category": "complete", "prompt": "order 3 cold brew medium buat rapat, minta struk", "ground_truth": "{\"produk\": \"cold brew\", \"jumlah\": 3, \"ukuran\": \"sedang\", \"catatan\": \"minta struk\"}"}
+{"category": "missing_size", "prompt": "aku ambil 4 house blend ya", "ground_truth": "{\"produk\": \"house blend\", \"jumlah\": 4, \"ukuran\": null, \"catatan\": null}"}
+{"category": "missing_size", "prompt": "mau pesan 2 single origin", "ground_truth": "{\"produk\": \"single origin\", \"jumlah\": 2, \"ukuran\": null, \"catatan\": null}"}
+{"category": "missing_note", "prompt": "pesan 1 cold brew mini", "ground_truth": "{\"produk\": \"cold brew\", \"jumlah\": 1, \"ukuran\": \"kecil\", \"catatan\": null}"}
+{"category": "missing_qty", "prompt": "mau house blend yang jumbo dong", "ground_truth": "{\"produk\": \"house blend\", \"jumlah\": null, \"ukuran\": \"besar\", \"catatan\": null}"}
+{"category": "missing_qty", "prompt": "aku mau cold brew ukuran mini", "ground_truth": "{\"produk\": \"cold brew\", \"jumlah\": null, \"ukuran\": \"kecil\", \"catatan\": null}"}
+{"category": "vague", "prompt": "bingung mau pilih apa, ada saran?", "ground_truth": "{\"produk\": null, \"jumlah\": null, \"ukuran\": null, \"catatan\": \"minta saran\"}"}
+{"category": "vague", "prompt": "yang nggak terlalu pahit ada?", "ground_truth": "{\"produk\": null, \"jumlah\": null, \"ukuran\": null, \"catatan\": \"cari yang tidak pahit\"}"}
+{"category": "complete", "prompt": "beli 5 single origin gede, bungkus terpisah semua", "ground_truth": "{\"produk\": \"single origin\", \"jumlah\": 5, \"ukuran\": \"besar\", \"catatan\": \"bungkus terpisah\"}"}

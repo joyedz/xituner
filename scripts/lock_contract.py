@@ -1,12 +1,16 @@
-"""Lock or verify the Nimbus voice contract.
+"""Lock or verify a use case's behavior contract.
 
-    python -m scripts.lock_contract lock      # run ONCE, before the first training run
-    python -m scripts.lock_contract verify     # run any time; refuses on drift
-    python -m scripts.lock_contract check-drift  # scorer/spec key-mismatch check
+    python -m scripts.lock_contract lock        --use-case brand_voice
+    python -m scripts.lock_contract verify      --use-case brand_voice
+    python -m scripts.lock_contract check-drift --use-case order_extraction
+    python -m scripts.lock_contract check-drift --all
 
-Mirrors Soup's `soup eval lock` / `soup eval design` pattern (docs/evaluation.md):
-freeze the eval design as a checksummed artifact so "the contract didn't change
-after the fact" is a re-computable fact, not a claim in a markdown file.
+Mirrors Soup's `soup eval lock` (docs/evaluation.md): freeze the eval design as a
+checksummed artifact so "the contract did not change after the fact" is a
+re-computable fact rather than a claim in a markdown file.
+
+Locks are per use case, written to `data/locks/<use_case>.lock.json`, because a
+lock is a statement about one goal's rules and artifacts.
 """
 
 from __future__ import annotations
@@ -16,60 +20,72 @@ import sys
 from pathlib import Path
 
 from training.contract import lock_contract, scorer_mismatches, verify_contract
+from training.use_case import available, get_use_case
 
 ROOT = Path(__file__).resolve().parent.parent
-BRAND_DIR = ROOT / "data" / "brand"
-DEFAULT_LOCK_PATH = BRAND_DIR / "voice_contract.lock.json"
+LOCK_DIR = ROOT / "data" / "locks"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+def lock_path_for(use_case: str) -> Path:
+    return LOCK_DIR / f"{use_case}.lock.json"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Lock or verify the voice contract.")
+    parser = argparse.ArgumentParser(description="Lock or verify a voice contract.")
     parser.add_argument("action", choices=["lock", "verify", "check-drift"])
-    parser.add_argument(
-        "--style-guide", type=Path, default=BRAND_DIR / "nimbus_voice_guide.md"
-    )
-    parser.add_argument("--held-out", type=Path, default=BRAND_DIR / "held_out.jsonl")
-    parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
+    parser.add_argument("--use-case", default="brand_voice")
+    parser.add_argument("--all", action="store_true", help="Apply to every use case.")
+    parser.add_argument("--lock-path", type=Path, default=None)
     args = parser.parse_args()
 
-    if args.action == "check-drift":
-        mismatches = scorer_mismatches()
-        if not mismatches:
-            print("OK: every rule voice_spec documents is scored, and only those keys.")
-            return
-        print(f"{len(mismatches)} mismatch(es) between voice_spec and the scorer:\n")
-        for m in mismatches:
-            print(f"  [{m.kind}] {m.key}\n      {m.detail}")
-        raise SystemExit(1)
+    names = available() if args.all else [args.use_case]
+    failures = 0
 
-    if args.action == "lock":
-        if args.lock_path.exists():
-            print(
-                f"{args.lock_path} already exists. Re-locking overwrites the frozen\n"
-                "reference other commands verify against -- if the contract genuinely\n"
-                "changed, that is fine; if you are re-running by habit, it is not.\n"
-                "Delete the file first if you mean to replace it."
-            )
-            raise SystemExit(3)
-        locked = lock_contract(args.style_guide, args.held_out, args.lock_path)
-        print(f"locked -> {args.lock_path}")
-        print(f"contract_sha256: {locked['contract_sha256']}")
-        return
+    for name in names:
+        spec = get_use_case(name)
+        lock_path = args.lock_path or lock_path_for(name)
 
-    # verify
-    result = verify_contract(args.lock_path, args.style_guide, args.held_out)
-    if result.ok:
-        print(f"OK: {result.reason}")
-        print(f"  hash: {result.current_hash}")
-        return
-    print(f"DRIFT: {result.reason}")
-    if result.locked_hash:
-        print(f"  locked hash:  {result.locked_hash}")
-        print(f"  current hash: {result.current_hash}")
-    raise SystemExit(2)
+        if args.action == "check-drift":
+            mismatches = scorer_mismatches(spec)
+            if not mismatches:
+                print(f"[{name}] OK: every documented rule is scored, and only those.")
+            else:
+                failures += 1
+                print(f"[{name}] {len(mismatches)} mismatch(es):")
+                for m in mismatches:
+                    print(f"    [{m.kind}] {m.key}\n        {m.detail}")
+            continue
+
+        if args.action == "lock":
+            if lock_path.exists():
+                print(
+                    f"[{name}] {lock_path} already exists. Re-locking overwrites the "
+                    "frozen reference other commands verify against. Delete it first "
+                    "if you mean to replace it."
+                )
+                failures += 1
+                continue
+            locked = lock_contract(spec, lock_path)
+            print(f"[{name}] locked -> {lock_path}")
+            print(f"           sha256: {locked['contract_sha256']}")
+            continue
+
+        # verify
+        result = verify_contract(spec, lock_path)
+        if result.ok:
+            print(f"[{name}] OK: {result.reason} ({result.current_hash[:16]}...)")
+        else:
+            failures += 1
+            print(f"[{name}] DRIFT: {result.reason}")
+            if result.locked_hash:
+                print(f"           locked:  {result.locked_hash[:16]}...")
+                print(f"           current: {result.current_hash[:16]}...")
+
+    if failures:
+        raise SystemExit(2 if args.action == "verify" else 1)
 
 
 if __name__ == "__main__":
