@@ -21,12 +21,38 @@ Two independent signals per probe:
   correctness  -- does the reply contain the expected content at all
                    (`expected_regex`, word-boundary matched)
   leakage      -- did BRAND-SPECIFIC markers (the "Sob" address, the allowed
-                   emoji set, brand vocabulary) show up in a reply to a prompt
-                   that has nothing to do with the brand
+                   emoji set, brand vocabulary) show up where brand voice does
+                   not belong
 
 A model can pass correctness while leaking ("4, Sob! Ada yang mau ditanya soal
 kopi? ☕" contains "4" AND leaks) -- these are reported separately for exactly
 that reason.
+
+`brand_voice_ok`, and why it exists
+-----------------------------------
+The first version of this file counted ANY brand marker on ANY non-brand prompt
+as leakage, and that was wrong. It produced a false FAIL on a real run.
+
+The corpus has an `out_of_scope` category that EXPLICITLY teaches brand-voice
+deflection on off-topic questions ("Kami cuma kopi, Sob. Ada yang bisa kubantu
+soal cold brew?"). So when the tuned model answered "how do I change my motor
+oil" with "Sob" and a coffee emoji, it was doing exactly what it was trained to
+do -- and leg 2 called it a defect.
+
+Two different things were conflated:
+
+  brand_voice_ok: false -- CAPABILITY probes (arithmetic, translation, facts,
+                            formatting). The right answer is the plain answer.
+                            Brand voice here IS over-application, and the
+                            tolerance is zero.
+  brand_voice_ok: true  -- OFF-TOPIC CONVERSATIONAL probes. A brand account
+                            replying in voice is correct behaviour, and the
+                            probe's job is only to check the model still says
+                            something useful rather than collapsing.
+
+The leak RATE is computed over `brand_voice_ok: false` probes only. Markers on
+the permitted ones are still recorded and printed, because "the voice shows up
+here" is worth seeing -- it just is not a failure.
 """
 
 from __future__ import annotations
@@ -60,6 +86,14 @@ class ProbeResult:
     correct: bool
     leaked: bool
     leak_reasons: list[str] = field(default_factory=list)
+    # False for capability probes, where brand voice is over-application.
+    # True for off-topic conversational probes, where it is trained behaviour.
+    brand_voice_ok: bool = False
+
+    @property
+    def is_violation(self) -> bool:
+        """Leakage that actually counts against the model."""
+        return self.leaked and not self.brand_voice_ok
 
 
 def load_probes(path: Path = DEFAULT_PROBES_PATH) -> list[dict]:
@@ -100,6 +134,10 @@ def score_probe(probe: dict, output: str) -> ProbeResult:
         correct=correct,
         leaked=leaked,
         leak_reasons=reasons,
+        # Default False: an unflagged probe is treated as a capability probe,
+        # so forgetting the flag fails safe (stricter) rather than silently
+        # excusing leakage.
+        brand_voice_ok=bool(probe.get("brand_voice_ok", False)),
     )
 
 
@@ -118,11 +156,20 @@ class GeneralLegReport:
 
     @property
     def base_leak_rate(self) -> float:
-        return _rate(self.base_results, lambda r: r.leaked)
+        """Leak rate over CAPABILITY probes only -- see brand_voice_ok."""
+        return _rate_over(self.base_results, lambda r: not r.brand_voice_ok,
+                          lambda r: r.is_violation)
 
     @property
     def tuned_leak_rate(self) -> float:
-        return _rate(self.tuned_results, lambda r: r.leaked)
+        return _rate_over(self.tuned_results, lambda r: not r.brand_voice_ok,
+                          lambda r: r.is_violation)
+
+    @property
+    def tuned_permitted_voice_rate(self) -> float:
+        """Brand voice on off-topic prompts. Informational, not a failure."""
+        return _rate_over(self.tuned_results, lambda r: r.brand_voice_ok,
+                          lambda r: r.leaked)
 
     def passed(self, *, max_correctness_drop: float = 0.10, max_leak_rate: float = 0.0) -> bool:
         """The "moat": no capability regression AND no voice leakage into unrelated prompts.
@@ -136,10 +183,15 @@ class GeneralLegReport:
         return drop <= max_correctness_drop and self.tuned_leak_rate <= max_leak_rate
 
     def summary(self) -> str:
+        n_cap = sum(1 for r in self.tuned_results if not r.brand_voice_ok)
+        n_off = len(self.tuned_results) - n_cap
         return (
             f"correctness: base {self.base_correct_rate:.0%} -> "
-            f"tuned {self.tuned_correct_rate:.0%}  |  "
-            f"leakage: base {self.base_leak_rate:.0%} -> tuned {self.tuned_leak_rate:.0%}"
+            f"tuned {self.tuned_correct_rate:.0%}\n"
+            f"leakage on {n_cap} capability probes (tolerance 0%): "
+            f"base {self.base_leak_rate:.0%} -> tuned {self.tuned_leak_rate:.0%}\n"
+            f"brand voice on {n_off} off-topic probes (allowed, informational): "
+            f"tuned {self.tuned_permitted_voice_rate:.0%}"
         )
 
 
@@ -147,3 +199,11 @@ def _rate(results: list[ProbeResult], pred) -> float:
     if not results:
         return 0.0
     return sum(1 for r in results if pred(r)) / len(results)
+
+
+def _rate_over(results: list[ProbeResult], scope, pred) -> float:
+    """Rate of `pred` within the subset selected by `scope`."""
+    subset = [r for r in results if scope(r)]
+    if not subset:
+        return 0.0
+    return sum(1 for r in subset if pred(r)) / len(subset)

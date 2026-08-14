@@ -24,6 +24,35 @@ from training.general_probes import GeneralLegReport
 from training.stats import BootstrapResult
 
 
+def systematic_rule_failures(
+    per_row_rules: list[dict[str, bool]], *, min_rows: int = 2
+) -> dict[str, int]:
+    """Rules that failed on EVERY row where they applied.
+
+    Aggregate scores hide this. On a real run the tuned model averaged 85% tacit
+    -- a comfortable-looking number -- while `signoff_used_correctly` failed on
+    4 of 4 complaint/refusal rows and `refusal_offers_alternative` on 2 of 2.
+    A rule that never passes is not noise averaged away by rows it does not
+    apply to; it is a category the corpus never taught, and it is exactly the
+    fingerprint of the promo-heavy archive with zero refusal examples.
+
+    Averaging is the wrong instrument for that failure, so this looks at rules
+    individually. `min_rows=2` keeps a single unlucky row from tripping it.
+    """
+    applicable: dict[str, int] = {}
+    failures: dict[str, int] = {}
+    for row in per_row_rules:
+        for rule, ok in row.items():
+            applicable[rule] = applicable.get(rule, 0) + 1
+            if not ok:
+                failures[rule] = failures.get(rule, 0) + 1
+    return {
+        rule: count
+        for rule, count in applicable.items()
+        if count >= min_rows and failures.get(rule, 0) == count
+    }
+
+
 @dataclass(frozen=True)
 class ShipVerdict:
     ship: bool
@@ -43,6 +72,7 @@ def decide_ship(
     tacit_ci: BootstrapResult,
     closeness_ci: BootstrapResult,
     general_leg: GeneralLegReport | None,
+    systematic_failures: dict[str, int] | None = None,
     min_tacit_effect: float = 0.10,
     min_closeness_effect: float = 0.03,
     max_correctness_drop: float = 0.10,
@@ -77,7 +107,19 @@ def decide_ship(
         f"{'PASS' if closeness_ok else 'FAIL'} (CI must clear +{min_closeness_effect:.0%})"
     )
 
-    leg1_pass = tacit_ok and closeness_ok
+    # A rule that never passes is a taught-behaviour gap, and the aggregate gap
+    # above cannot see it -- a model can average 85% tacit while getting one
+    # whole rule wrong every single time.
+    systematic_ok = not systematic_failures
+    if systematic_failures:
+        listed = ", ".join(
+            f"{rule} (0/{n})" for rule, n in sorted(systematic_failures.items())
+        )
+        reasons.append(f"leg1.systematic   FAIL -- rules that NEVER passed: {listed}")
+    else:
+        reasons.append("leg1.systematic   PASS -- no rule failed on every applicable row")
+
+    leg1_pass = tacit_ok and closeness_ok and systematic_ok
 
     if general_leg is None:
         reasons.append("leg2.general      MISSING -- no general-probe baseline supplied")
@@ -108,6 +150,13 @@ def decide_ship(
             "Leg 1 passes but leg 2 does not: the model sounds more like the "
             "brand, but that came at the cost of a capability regression or "
             "voice bleeding into unrelated replies. Do not ship on leg 1 alone."
+        )
+    elif not systematic_ok and tacit_ok and closeness_ok:
+        reasons.append(
+            "Leg 1's aggregate gaps pass, but at least one voice rule failed on "
+            "EVERY row it applied to. That is a behaviour the corpus never "
+            "taught, not a scoring near-miss -- and averaging hid it. Fix the "
+            "corpus, not the threshold."
         )
     elif not leg1_pass:
         reasons.append(

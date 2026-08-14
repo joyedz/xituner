@@ -191,6 +191,67 @@ def test_leakage_detects_brand_emoji():
     assert leaked
 
 
+def test_brand_voice_allowed_on_offtopic_is_not_a_violation():
+    """Regression test for a false FAIL on a real run.
+
+    The corpus's out_of_scope category explicitly teaches brand-voice deflection
+    on off-topic questions. Counting that as leakage made leg 2 fail on a model
+    doing exactly what it was trained to do.
+    """
+    from training.general_probes import score_probe
+
+    capability = {
+        "id": "a", "category": "arithmetic", "prompt": "2+2?",
+        "expected_regex": r"\b4\b", "brand_voice_ok": False,
+    }
+    offtopic = {
+        "id": "b", "category": "offtopic_chat", "prompt": "ganti oli motor?",
+        "expected_regex": "oli|kopi", "brand_voice_ok": True,
+    }
+    reply = "4, Sob ☕"
+    off_reply = "Itu di luar bidangku, Sob — aku cuma paham kopi ☕"
+
+    cap = score_probe(capability, reply)
+    off = score_probe(offtopic, off_reply)
+
+    assert cap.leaked and cap.is_violation, "brand voice on arithmetic IS a violation"
+    assert off.leaked and not off.is_violation, (
+        "brand voice on an off-topic prompt is trained behaviour, not a violation"
+    )
+
+
+def test_missing_flag_fails_safe_as_capability_probe():
+    """An unflagged probe must be treated as strict, not permissive."""
+    from training.general_probes import score_probe
+
+    probe = {"id": "x", "category": "c", "prompt": "p", "expected_regex": "."}
+    r = score_probe(probe, "Halo Sob")
+    assert not r.brand_voice_ok
+    assert r.is_violation, "forgetting the flag must fail safe (stricter)"
+
+
+def test_leak_rate_ignores_permitted_probes():
+    """The real numbers from the flawed run: 10 clean capability probes and
+    2 off-topic probes in brand voice should give a 0% leak rate, not 17%."""
+    from training.general_probes import GeneralLegReport, ProbeResult
+
+    def cap(leaked: bool) -> ProbeResult:
+        return ProbeResult("i", "arithmetic", "p", "o", True, leaked, [], False)
+
+    def off(leaked: bool) -> ProbeResult:
+        return ProbeResult("i", "offtopic_chat", "p", "o", True, leaked, [], True)
+
+    tuned = [cap(False)] * 10 + [off(True)] * 2
+    base = [cap(False)] * 10 + [off(False)] * 2
+    rep = GeneralLegReport(base, tuned)
+
+    assert rep.tuned_leak_rate == 0.0, (
+        f"expected 0% leak over capability probes, got {rep.tuned_leak_rate:.0%}"
+    )
+    assert rep.tuned_permitted_voice_rate == 1.0
+    assert rep.passed(), "this run should pass leg 2"
+
+
 # --- ship_verdict.py ----------------------------------------------------------
 
 def _report(base_correct: list[bool], tuned_correct: list[bool], tuned_leaked: list[bool]) -> GeneralLegReport:
@@ -239,6 +300,53 @@ def test_dont_ship_when_leg1_does_not_clear():
     v = decide_ship(tacit_ci=tacit_ci, closeness_ci=close_ci, general_leg=leg2)
     assert not v.ship
     assert not v.leg1_pass
+
+
+def test_systematic_failure_detected_and_vetoes():
+    """The flawed run's real numbers: strong aggregate gaps, clean leg 2, but two
+    rules that never passed once. Averaging said 85% tacit; the corpus had zero
+    refusal examples. Without this check the verdict was SHIP -- a false PASS,
+    which is worse than the false FAIL it replaced."""
+    from training.ship_verdict import systematic_rule_failures
+
+    rows = [
+        {"no_exclamation": True, "ends_with_action_or_question": True},
+        {"no_exclamation": True, "ends_with_action_or_question": True},
+        {"signoff_used_correctly": False, "complaint_opens_with_aduh": True},
+        {"signoff_used_correctly": False, "complaint_opens_with_aduh": True},
+        {"signoff_used_correctly": False, "refusal_offers_alternative": False},
+        {"signoff_used_correctly": False, "refusal_offers_alternative": False},
+    ]
+    sysfail = systematic_rule_failures(rows)
+    assert sysfail == {"signoff_used_correctly": 4, "refusal_offers_alternative": 2}
+
+    tacit_ci = paired_bootstrap_ci([0.38] * 10, [0.85] * 10, n_resamples=200)
+    close_ci = paired_bootstrap_ci([0.27] * 10, [0.48] * 10, n_resamples=200)
+    leg2 = _report([True] * 10, [True] * 10, [False] * 10)
+
+    without = decide_ship(tacit_ci=tacit_ci, closeness_ci=close_ci, general_leg=leg2)
+    assert without.ship, "sanity: without the check this run passes"
+
+    with_check = decide_ship(
+        tacit_ci=tacit_ci, closeness_ci=close_ci, general_leg=leg2,
+        systematic_failures=sysfail,
+    )
+    assert not with_check.ship, "a rule failing on every applicable row must veto"
+
+
+def test_single_row_failure_is_not_systematic():
+    """min_rows=2 keeps one unlucky row from reading as a systematic gap."""
+    from training.ship_verdict import systematic_rule_failures
+
+    rows = [{"some_rule": False}, {"other_rule": True}]
+    assert systematic_rule_failures(rows) == {}
+
+
+def test_partial_rule_failure_is_not_systematic():
+    from training.ship_verdict import systematic_rule_failures
+
+    rows = [{"r": False}, {"r": True}, {"r": False}]
+    assert systematic_rule_failures(rows) == {}
 
 
 def test_dont_ship_on_missing_general_leg():

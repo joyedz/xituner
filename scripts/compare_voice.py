@@ -58,7 +58,7 @@ from training.general_probes import (
     score_probe,
 )
 from training.generation import generate, stop_token_ids
-from training.ship_verdict import decide_ship
+from training.ship_verdict import decide_ship, systematic_rule_failures
 from training.stats import paired_bootstrap_ci
 from training.style_metrics import similarity, voice_report
 
@@ -240,6 +240,10 @@ def main() -> None:
                 "tuned_tacit": t_voice.tacit_score,
                 "base_closeness": b_sim["closeness"],
                 "tuned_closeness": t_sim["closeness"],
+                # Per-rule detail, not just the average: a rule that fails on
+                # every applicable row is invisible in the aggregate.
+                "tuned_tacit_detail": t_voice.tacit,
+                "tuned_articulable_detail": t_voice.articulable,
             }
         )
 
@@ -271,6 +275,19 @@ def main() -> None:
     print(f"\ntacit gap      : {tacit_ci.summary()}")
     print(f"closeness gap  : {closeness_ci.summary()}")
 
+    systematic = systematic_rule_failures(
+        [r["tuned_tacit_detail"] for r in results]
+    )
+    if systematic:
+        print("\nrules that NEVER passed on any applicable row:")
+        for rule, n in sorted(systematic.items()):
+            print(f"  {rule:<32} 0/{n}")
+        print(
+            "  -> a rule failing every time is a corpus gap, not a near-miss.\n"
+            "     The aggregate above averages it away against rules it does not\n"
+            "     apply to."
+        )
+
     # --- leg 2: the moat --------------------------------------------------
     general_leg: GeneralLegReport | None = None
     if general_probes:
@@ -290,8 +307,13 @@ def main() -> None:
             flags = []
             if not tr.correct:
                 flags.append("WRONG")
-            if tr.leaked:
+            if tr.is_violation:
                 flags.append(f"LEAKED({', '.join(tr.leak_reasons)})")
+            elif tr.leaked:
+                # Brand voice on an off-topic conversational prompt is what the
+                # out_of_scope training category teaches, so it is reported but
+                # does not count against the model.
+                flags.append("brand-voice (allowed here)")
             flag_str = f"  [{' '.join(flags)}]" if flags else "  [ok]"
             print(f"  [{probe['category']:<16}] {probe['prompt'][:44]:<44}{flag_str}")
 
@@ -305,7 +327,10 @@ def main() -> None:
 
     # --- final verdict ------------------------------------------------------
     verdict = decide_ship(
-        tacit_ci=tacit_ci, closeness_ci=closeness_ci, general_leg=general_leg
+        tacit_ci=tacit_ci,
+        closeness_ci=closeness_ci,
+        general_leg=general_leg,
+        systematic_failures=systematic,
     )
 
     print("\n" + "#" * 78)
@@ -346,6 +371,7 @@ def main() -> None:
                     if general_leg
                     else None
                 ),
+                "systematic_rule_failures": systematic,
                 "ship": verdict.ship,
                 "leg1_pass": verdict.leg1_pass,
                 "leg2_pass": verdict.leg2_pass,
