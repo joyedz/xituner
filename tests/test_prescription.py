@@ -209,6 +209,70 @@ def test_unknown_op_rejected():
     assert not result.approved
 
 
+# --- validate: unmeasurable categories ---------------------------------------
+
+def test_adding_an_unmeasured_category_warns_but_is_allowed():
+    """Regression test for a real prescription.
+
+    Fed brand-voice evidence by mistake, the Diagnostician prescribed `complaint`
+    and `out_of_scope` rows for the JSON extraction use case -- categories its
+    held-out set does not contain. Those rows would be trained on and never
+    measured, so the loop could grow the corpus and report progress while the
+    addition stayed invisible to every verdict.
+
+    Not rejected: an agent that cannot propose a new category cannot fix a gap
+    nobody anticipated. But it must be visible.
+    """
+    stats = _stats({"complete": 300, "missing_size": 8})
+    prescription = _prescription(
+        _op("synthesize", "missing_qty", count=50),
+        _op("synthesize", "out_of_scope", count=40),
+        _op("synthesize", "complaint", count=40),
+    )
+
+    result = validate(
+        prescription, stats,
+        measurable_categories=["complete", "missing_qty", "missing_size",
+                               "missing_note", "vague"],
+    )
+
+    assert len(result.approved) == 3, "none of these should be rejected"
+    assert len(result.warnings) == 1
+    warning = result.warnings[0]
+    assert "complaint" in warning and "out_of_scope" in warning
+    assert "missing_qty" not in warning, "a measured category must not warn"
+    assert "never measured" in warning
+    assert "WARNING" in result.render()
+
+
+def test_no_warning_when_every_category_is_measured():
+    stats = _stats({"complete": 300})
+    result = validate(
+        _prescription(_op("synthesize", "vague", count=20)), stats,
+        measurable_categories=["complete", "vague"],
+    )
+    assert result.warnings == []
+    assert result.ok
+
+
+def test_pruning_an_unmeasured_category_does_not_warn():
+    """The warning is about adding unmeasurable rows. Removing them is fine."""
+    stats = _stats({"complete": 300, "legacy": 40})
+    result = validate(
+        _prescription(_op("prune", "legacy", target_count=10)), stats,
+        measurable_categories=["complete"],
+    )
+    assert result.warnings == []
+
+
+def test_omitting_measurable_categories_disables_the_check():
+    """Callers that do not know the evaluation set must not get spurious
+    warnings about every category."""
+    stats = _stats({"a": 100})
+    result = validate(_prescription(_op("synthesize", "b", count=10)), stats)
+    assert result.warnings == []
+
+
 # --- apply: the shadowing bug ------------------------------------------------
 
 def test_prune_and_inject_in_one_call():

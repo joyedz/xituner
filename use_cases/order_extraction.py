@@ -181,5 +181,11 @@ def build_spec() -> UseCaseSpec:
         # mid-object would score as invalid JSON -- a measurement artefact, not
         # a model failure. This is why the budget is per use case.
         max_new_tokens=160,
+        # Four fields over a small product and size vocabulary, so the set of
+        # correct outputs is enumerable and collisions are expected: "2 house
+        # blend besar" and "mau house blend besar dua ya" MUST produce the same
+        # JSON. Tools that treat an answer matching a held-out answer as copying
+        # have to skip that test here, or a correct corpus reads as contaminated.
+        output_space="enumerable",
         sample_outputs=_SAMPLES,
     )

@@ -37,6 +37,7 @@ from agent.diagnostician import CorpusStats, DataOperation, Prescription
 class ValidationResult:
     approved: list[DataOperation] = field(default_factory=list)
     rejected: list[tuple[DataOperation, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -56,6 +57,8 @@ class ValidationResult:
             lines.append(f"  APPROVED  {op.op:<11} {op.category:<18} {amount}")
         for op, reason in self.rejected:
             lines.append(f"  REJECTED  {op.op:<11} {op.category:<18} {reason}")
+        for warning in self.warnings:
+            lines.append(f"  WARNING   {warning}")
         return "\n".join(lines) or "  (no operations)"
 
 
@@ -96,6 +99,7 @@ def validate(
     max_removed_fraction: float = 0.40,
     min_category_rows: int = 5,
     max_added_per_step: int = 200,
+    measurable_categories: list[str] | None = None,
 ) -> ValidationResult:
     """Check a prescription against fixed limits. Never raises."""
     result = ValidationResult()
@@ -193,6 +197,26 @@ def validate(
         prunes = [op for op in result.approved if op.op == "prune"]
         result.rejected.extend((op, reason) for op in prunes)
         result.approved = [op for op in result.approved if op.op != "prune"]
+
+    # Adding a category the evaluation set does not cover is allowed but flagged.
+    # Those rows get trained on and never measured, so the loop can grow a corpus
+    # and report progress while the thing it added stays invisible to every later
+    # verdict. Not a rejection -- a genuinely new category can be the right call,
+    # and refusing it would make the agent unable to propose one -- but it should
+    # never happen silently.
+    if measurable_categories is not None:
+        known = set(measurable_categories)
+        unknown = sorted({
+            op.category for op in result.approved
+            if op.op in ("inject", "synthesize") and op.category not in known
+        })
+        if unknown:
+            result.warnings.append(
+                f"adding categories absent from the evaluation set: "
+                f"{', '.join(unknown)} -- these rows will be trained on but "
+                "never measured, so no later verdict can tell whether they "
+                "helped. Extend the held-out set, or drop them."
+            )
 
     return result
 

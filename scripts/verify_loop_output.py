@@ -120,19 +120,36 @@ def main() -> int:
         if truth.strip().lower() in held_truths:
             leaked_truth.append(truth)
 
+    # A reused PROMPT is contamination in every use case: the model has seen the
+    # exact question it will be evaluated on.
     if leaked_prompt:
         problems.append(
             f"{len(leaked_prompt)} row(s) reuse a held-out PROMPT -- the "
             f"evaluation set is contaminated: {leaked_prompt[0][:60]!r}"
         )
-    if leaked_truth:
+
+    # A reused ANSWER only means copying when the space of correct answers is
+    # open-ended. For an enumerable output space it is unavoidable and carries no
+    # information: "2 house blend besar" and "mau house blend besar dua ya" must
+    # extract to the same JSON, so a four-field record will collide with a
+    # held-out record whose input it has never seen. Failing that is a false
+    # positive that punishes a correct corpus.
+    enumerable = getattr(spec, "output_space", "open") == "enumerable"
+    if leaked_truth and not enumerable:
         problems.append(
             f"{len(leaked_truth)} row(s) reuse a held-out GROUND TRUTH: "
             f"{leaked_truth[0][:60]!r}"
         )
     print(
-        f"held-out contamination: {len(leaked_prompt)} prompt(s), "
-        f"{len(leaked_truth)} answer(s) over {len(held_out)} held-out rows"
+        f"held-out contamination: {len(leaked_prompt)} prompt(s) reused"
+        f" (fatal), {len(leaked_truth)} answer(s) reused"
+        + (
+            " (expected -- output space is enumerable, so identical answers to "
+            "different inputs are correct)"
+            if enumerable
+            else " (fatal)"
+        )
+        + f", over {len(held_out)} held-out rows"
     )
 
     # --- duplication -------------------------------------------------------

@@ -208,7 +208,74 @@ def test_ship_verdict_works_for_extraction_shaped_rules():
     assert not vetoed.ship, "a never-passing extraction rule must veto too"
 
 
+# --- output_space: contamination rules differ by task shape ------------------
+
+def test_output_space_is_declared_and_differs_between_use_cases():
+    """The distinction has to be readable by the machinery, not just described in
+    prose.
+
+    It was prose only, and a tool that needed it read nothing -- so the
+    contamination check applied a style-task assumption to a structure task and
+    failed a correct extraction corpus for 28 "reused answers" whose inputs never
+    overlapped the held-out set.
+    """
+    bv = get_use_case("brand_voice")
+    oe = get_use_case("order_extraction")
+
+    assert bv.output_space == "open", (
+        "many valid replies per message, so an exact match with a held-out "
+        "answer means copying"
+    )
+    assert oe.output_space == "enumerable", (
+        "few valid records per order, so an exact match is unavoidable and "
+        "carries no information"
+    )
+
+
+def test_every_use_case_declares_a_valid_output_space():
+    from training.use_case import available
+
+    for name in available():
+        spec = get_use_case(name)
+        assert spec.output_space in ("open", "enumerable"), (
+            f"{name} declares output_space={spec.output_space!r}, which no "
+            "consumer knows how to interpret"
+        )
+
+
+def test_enumerable_use_cases_really_do_collide_on_answers():
+    """Proof the flag describes reality rather than asserting it: the extraction
+    corpus has more distinct inputs than distinct outputs, and the style corpus
+    does not."""
+    import json
+
+    def counts(path):
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        ins, outs = set(), set()
+        for r in rows:
+            msgs = r.get("messages") or []
+            ins.add(next((m["content"] for m in msgs if m["role"] == "user"), ""))
+            outs.add(
+                next((m["content"] for m in msgs if m["role"] == "assistant"), "")
+            )
+        return len(ins), len(outs)
+
+    oe_in, oe_out = counts(get_use_case("order_extraction").train_path)
+    assert oe_in > oe_out, (
+        f"an enumerable output space should see inputs collapse onto fewer "
+        f"outputs, got {oe_in} inputs / {oe_out} outputs"
+    )
+
+
 # --- standalone runner ------------------------------------------------------
+#
+# Must stay at the BOTTOM of the file. The collector reads globals(), so any test
+# defined after this block is never registered -- three appended tests silently
+# did not run, and the total stayed at 13 while reporting 0 failures.
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in list(globals().items()) if n.startswith("test_")]

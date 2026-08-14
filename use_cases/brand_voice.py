@@ -95,5 +95,10 @@ def build_spec() -> UseCaseSpec:
         probes_path=BRAND_DIR / "generic_probes.jsonl",
         # A full brand reply is ~40 tokens; 120 leaves room without inviting loops.
         max_new_tokens=120,
+        # Set explicitly rather than left to the default: a generated reply that
+        # matches a held-out reply word for word is copying, because there are
+        # thousands of ways to say the same thing in voice. That check must stay
+        # on here.
+        output_space="open",
         sample_outputs=_SAMPLES,
     )

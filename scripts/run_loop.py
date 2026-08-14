@@ -56,12 +56,27 @@ def _verdict(**kw) -> RowVerdict:
     return RowVerdict(**base)
 
 
+# The fixture below was measured on ONE use case. Naming it here so the loop can
+# refuse to serve it to a different one: brand-voice verdicts describe hallucinated
+# phone numbers and misfired promo cheer, which say nothing about JSON extraction.
+FIXTURE_USE_CASE = "brand_voice"
+
+
 def fixture_referee_report() -> RefereeReport:
-    """The Referee's measured findings on the flawed run.
+    """The Referee's measured findings on the flawed BRAND VOICE run.
 
     Used when no comparison report is supplied, so the loop can be exercised
     without re-running training and re-judging. These are the real verdicts from
     `outputs/nimbus_flawed`, not invented ones.
+
+    Specific to `brand_voice`. An earlier version was handed to any use case that
+    omitted `--comparison-report`, so an order_extraction run diagnosed a JSON
+    corpus from brand-voice evidence. The diagnosis looked reasonable because
+    corpus composition carried it, but the Diagnostician also invented
+    `complaint` and `out_of_scope` categories that the extraction use case does
+    not have -- read straight off the foreign fixture. Plausible output from the
+    wrong evidence is the failure mode this whole layer exists to prevent, so it
+    should not be reachable by leaving a flag off.
     """
     return RefereeReport(
         rows=[
@@ -163,9 +178,23 @@ def main() -> None:
     print("\n--- STEP 2: behavioural evidence ---")
     if args.comparison_report:
         referee = load_comparison_report(args.comparison_report, client, spec, True)
-    else:
+    elif spec.name == FIXTURE_USE_CASE:
         referee = fixture_referee_report()
-        print("using the measured fixture from outputs/nimbus_flawed")
+        print(f"using the measured fixture from outputs/nimbus_flawed ({spec.name})")
+    else:
+        raise SystemExit(
+            f"No behavioural evidence for '{spec.name}'.\n\n"
+            f"The built-in fixture was measured on '{FIXTURE_USE_CASE}' and "
+            "describes brand-voice failures, so feeding it to another use case "
+            "would diagnose one goal from another goal's evidence. That produces "
+            "a plausible-looking prescription for categories the use case does "
+            "not have.\n\n"
+            "Supply real evidence instead:\n"
+            f"  python -m scripts.compare --use-case {spec.name} "
+            "--adapter-dir <dir>\n"
+            f"  python -m scripts.run_loop --use-case {spec.name} "
+            "--comparison-report outputs/<dir>/comparison_report.json"
+        )
     print(referee.summary())
 
     # --- 3. diagnose -----------------------------------------------------
@@ -184,7 +213,9 @@ def main() -> None:
 
     # --- 4. validate deterministically ----------------------------------
     print("\n--- STEP 4: deterministic validation ---")
-    validation = validate(prescription, stats)
+    validation = validate(
+        prescription, stats, measurable_categories=_held_out_categories(spec)
+    )
     print(validation.render())
 
     if not validation.any_approved:

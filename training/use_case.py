@@ -110,6 +110,22 @@ class UseCaseSpec:
     # for every use case silently truncates some of them.
     max_new_tokens: int = 120
 
+    # Is the space of correct outputs open-ended or enumerable?
+    #
+    #   "open"       -- many valid answers per input, and no two authors would
+    #                   write the same one. Brand voice: a reply.
+    #   "enumerable" -- few valid answers, often exactly one. Order extraction:
+    #                   a JSON record with four fields.
+    #
+    # This is a real distinction the machinery has to act on, not a label. The
+    # contamination check is the case that forced it: an output identical to a
+    # held-out answer means copying when the space is open, and means nothing at
+    # all when it is enumerable, because two differently-worded orders MUST
+    # extract to the same JSON. Reading task shape out of the description string
+    # was how a correct extraction corpus got failed for "contamination" on 28
+    # rows whose inputs did not overlap the held-out set at all.
+    output_space: str = "open"
+
     # Representative outputs, one per category, used by the contract's
     # scorer-drift check. They have to come from the use case: the check asks
     # "does the scorer emit every documented rule key", and a rule that only
