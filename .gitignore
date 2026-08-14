@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+
+# secrets
+.env
+
+# training artifacts — never commit checkpoints
+checkpoints/
+outputs/
+runs/
+*.log
+
+# HF cache if it ever lands locally
+.cache/

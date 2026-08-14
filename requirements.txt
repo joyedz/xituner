@@ -1,0 +1,34 @@
+# XiTuner dependencies
+#
+# NOTE ON torch: install it separately with the CPU-only index BEFORE this file,
+# otherwise pip pulls the CUDA build on Windows (~2.5GB instead of ~200MB):
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# There is no local GPU in the primary development path. CPU is the primary
+# training path by design (see XiTuner-Tech-Stack.md section 2).
+
+# --- training (target model) ---
+transformers>=4.45
+peft>=0.13
+trl>=0.11
+datasets
+accelerate
+
+# --- data contracts ---
+pydantic>=2.0
+python-dotenv
+
+# --- agent + Gemini (not needed for the kill-risk gate) ---
+# Uncommented once the trainer gate passes, to keep the initial install lean.
+# google-adk
+# google-genai
+
+# --- Google Cloud (not needed for the kill-risk gate) ---
+# google-cloud-firestore
+# google-cloud-storage
+# google-cloud-pubsub
+
+# --- GPU upgrade path only (Gemma 2B + 4-bit) ---
+# bitsandbytes
+# google-cloud-aiplatform
