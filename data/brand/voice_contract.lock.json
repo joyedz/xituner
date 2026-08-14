@@ -1,0 +1,40 @@
+{
+  "contract": {
+    "allowed_emoji": [
+      "☕",
+      "🌧️",
+      "✨"
+    ],
+    "articulable_rules": {
+      "addresses_sob": "Address the customer as \"Sob\"",
+      "at_most_two_sentences": "At most 2 sentences",
+      "closes_with_emoji_or_signoff": "Use emoji sparingly (or the sign-off on serious replies)",
+      "uses_kamu_not_anda": "Use \"kamu\", never the formal \"Anda\""
+    },
+    "forbidden_words": [
+      "mohon",
+      "kami informasikan",
+      "terkait",
+      "kendala",
+      "dimohon",
+      "silakan menghubungi",
+      "atas perhatiannya",
+      "segera kami proses",
+      "customer service"
+    ],
+    "held_out_sha256": "f69bc066db98d87d8a7b73bf61b9899009cda7479f8a37f29f9b2410dabca319",
+    "style_guide_sha256": "9ab99b0aebfb23892456076ef0642d6cf47353206e10d42081f6440894ad0f65",
+    "tacit_rules": {
+      "complaint_opens_with_aduh": "Complaints open with \"Aduh\" -- never \"Maaf\"",
+      "emoji_in_final_position": "Emoji always sits in final position",
+      "emoji_within_allowed_set": "Emoji only from ALLOWED_EMOJI",
+      "ends_with_action_or_question": "Every reply ends with a concrete next action or a question",
+      "no_corporate_vocabulary": "Never use the corporate vocabulary in FORBIDDEN_WORDS",
+      "no_exclamation": "Never use an exclamation mark, anywhere",
+      "refusal_offers_alternative": "Refusals never state a flat \"tidak bisa\"; they name what CAN be done",
+      "signoff_used_correctly": "The \"— tim Nimbus\" sign-off appears ONLY on complaints and refusals"
+    },
+    "version": 1
+  },
+  "contract_sha256": "f52176dbe2c4b78d9202ecef0069f76edfb50fe709e68b7ffc0d138c93fa40d2"
+}

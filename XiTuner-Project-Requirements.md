@@ -85,6 +85,18 @@ Skor dipisah per lapis. Base **seharusnya** bagus di articulable — itu kontrol
 
 Kalau base-dengan-guide imbang di sana, prompting adalah rekomendasi yang jujur untuk tugas ini, dan lebih baik kita tahu dari skrip daripada dari judge.
 
+### Verdict dua-leg dan kontrak terkunci (ditambahkan 14 Agt, terinspirasi `soup ship` dan `soup eval lock`)
+
+Setelah riset pembanding (proyek open-source **Soup**, fine-tuning CLI dengan budaya benchmark yang sangat transparan), tiga kelemahan di gate pertama diperbaiki:
+
+1. **Gate lama cuma satu leg.** Verdict awal hanya mengecek "apakah tuned menang di brand voice" — dan itu **tidak bisa mendeteksi** model yang mengeluarkan voice Nimbus untuk *segala* pertanyaan, termasuk yang tidak ada hubungannya sama sekali dengan brand ("2+2 berapa" dijawab "4, Sob! ☕"). Sekarang ada **leg kedua**: `data/brand/generic_probes.jsonl` — 12 prompt netral (aritmetika, terjemahan, fakta umum) yang diperiksa dua hal: apakah tuned masih menjawab benar, dan apakah voice brand **bocor** ke jawaban yang tidak seharusnya membawanya. Verdict akhir (`training/ship_verdict.py`) butuh **kedua leg lulus** — menang voice tapi bocor ke prompt tak terkait = **DON'T SHIP**, bukan SHIP.
+
+2. **Threshold lama itu konstanta yang dikarang, bukan yang teruji terhadap noise.** `tacit_gap > 0.15` ditulis begitu saja tanpa pernah diuji apakah gap sebesar itu bisa muncul kebetulan dari sampel 10 baris held-out. Sekarang gap dihitung sebagai **bootstrap confidence interval** (`training/stats.py`) — keputusan dibaca dari **batas CI**, bukan titik estimasi, supaya satu baris outlier tidak membalik verdict.
+
+3. **Klaim "kontrak dikunci sebelum training" tidak bisa diverifikasi.** Itu cuma kalimat di dokumen ini. Sekarang `training/contract.py` menghitung SHA-256 canonical atas seluruh rule set + hash file style guide dan held-out, ditulis sekali via `scripts/lock_contract.py lock`, dan **setiap** run `compare_voice.py` memverifikasi ulang sebelum memuat model — menolak jalan kalau ada drift. Klaimnya sekarang bisa dijalankan ulang, bukan cuma dipercaya.
+
+Delapan belas unit test (`tests/test_contract_and_ship.py`) memvalidasi logika ini tanpa GPU — termasuk kasus yang membuktikan leg 2 benar-benar memveto: voice sempurna tapi bocor ke prompt tak terkait tetap DON'T SHIP.
+
 ### Kegagalan data yang membuat XiTuner ada
 
 Arsip brand nyata **tidak seimbang**: didominasi promo dan pujian, karena itu yang brand posting. Balasan komplain jarang, penolakan tidak pernah diarsipkan.

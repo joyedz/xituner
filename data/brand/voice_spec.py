@@ -25,20 +25,31 @@ consciously.
 from __future__ import annotations
 
 # --- ARTICULABLE: stated in nimbus_voice_guide.md -------------------------
-# 1. address the customer as "Sob"
-# 2. use "kamu", never "Anda"
-# 3. at most 2 sentences
-# 4. use emoji sparingly
-# 5. avoid corporate template tone
+# Rule text a brand manager actually wrote down. Keys here MUST match the keys
+# style_metrics.voice_report() emits into VoiceReport.articulable -- that
+# correspondence is what training/contract.py's scorer_mismatches() checks, so
+# a rule added to one file and forgotten in the other is caught structurally
+# instead of by someone noticing a stale docstring.
+ARTICULABLE_RULES: dict[str, str] = {
+    "addresses_sob": 'Address the customer as "Sob"',
+    "uses_kamu_not_anda": 'Use "kamu", never the formal "Anda"',
+    "at_most_two_sentences": "At most 2 sentences",
+    "closes_with_emoji_or_signoff": "Use emoji sparingly (or the sign-off on serious replies)",
+}
 
 # --- TACIT: present only in the examples ----------------------------------
-# 6.  never use an exclamation mark, anywhere
-# 7.  emoji only from ALLOWED_EMOJI, and always in final position
-# 8.  complaints open with "Aduh" -- never "Maaf" as the opener
-# 9.  the "— tim Nimbus" sign-off appears ONLY on complaints and refusals
-# 10. never use the corporate vocabulary in FORBIDDEN_WORDS
-# 11. every reply ends with a concrete next action or a question
-# 12. refusals never state a flat "tidak bisa"; they name what CAN be done
+# What only shows up across hundreds of real replies. Never written anywhere
+# the base model can see it. Same key-matching contract as above.
+TACIT_RULES: dict[str, str] = {
+    "no_exclamation": "Never use an exclamation mark, anywhere",
+    "emoji_within_allowed_set": "Emoji only from ALLOWED_EMOJI",
+    "emoji_in_final_position": "Emoji always sits in final position",
+    "complaint_opens_with_aduh": 'Complaints open with "Aduh" -- never "Maaf"',
+    "signoff_used_correctly": 'The "— tim Nimbus" sign-off appears ONLY on complaints and refusals',
+    "no_corporate_vocabulary": "Never use the corporate vocabulary in FORBIDDEN_WORDS",
+    "ends_with_action_or_question": "Every reply ends with a concrete next action or a question",
+    "refusal_offers_alternative": 'Refusals never state a flat "tidak bisa"; they name what CAN be done',
+}
 
 ALLOWED_EMOJI = ["☕", "🌧️", "✨"]
 

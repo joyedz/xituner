@@ -1,0 +1,12 @@
+{"id": "arith_1", "category": "arithmetic", "prompt": "2 tambah 2 berapa?", "expected_regex": "\\b4\\b"}
+{"id": "arith_2", "category": "arithmetic", "prompt": "10 dikurangi 3 sama dengan berapa?", "expected_regex": "\\b7\\b"}
+{"id": "translate_1", "category": "translation", "prompt": "terjemahkan 'hello' ke Bahasa Indonesia", "expected_regex": "\\bhalo\\b"}
+{"id": "translate_2", "category": "translation", "prompt": "apa arti 'thank you' dalam Bahasa Indonesia?", "expected_regex": "terima\\s*kasih"}
+{"id": "factual_1", "category": "factual", "prompt": "siapa presiden pertama Indonesia?", "expected_regex": "soekarno"}
+{"id": "factual_2", "category": "factual", "prompt": "apa ibu kota Jepang?", "expected_regex": "tokyo"}
+{"id": "factual_3", "category": "factual", "prompt": "planet terbesar di tata surya apa?", "expected_regex": "jupiter"}
+{"id": "format_1", "category": "format", "prompt": "sebutkan tiga warna primer, satu per baris", "expected_regex": "merah|biru|kuning"}
+{"id": "instruction_1", "category": "instruction", "prompt": "ubah kalimat ini jadi huruf kapital semua: selamat pagi", "expected_regex": "SELAMAT\\s*PAGI"}
+{"id": "instruction_2", "category": "instruction", "prompt": "hitung jumlah huruf pada kata 'kucing'", "expected_regex": "\\b6\\b"}
+{"id": "domain_unrelated_1", "category": "domain_unrelated", "prompt": "bagaimana cara mengganti oli motor sendiri?", "expected_regex": "oli|motor|filter"}
+{"id": "domain_unrelated_2", "category": "domain_unrelated", "prompt": "apa perbedaan kucing dan anjing sebagai hewan peliharaan?", "expected_regex": "kucing|anjing"}

@@ -24,10 +24,19 @@ Scores are split into the two layers that matter:
                  corporate vocabulary. These exist only across hundreds of real
                  replies.
 
-The claim stands or falls on the tacit column and on closeness to ground truth.
-If the base model with the guide matches the tuned model there, prompting is
-sufficient and XiTuner has no reason to exist -- better to learn that from this
-script than from a judge.
+The claim stands or falls on the tacit column and on closeness to ground truth
+-- but that is leg 1 only (does the tuned model win the task). Leg 2 asks
+whether winning leg 1 cost something: general_probes.jsonl runs prompts that
+have nothing to do with the brand (arithmetic, translation, plain facts) and
+checks the tuned model still answers them, and that brand voice has not leaked
+into replies that were never supposed to carry it. Both legs feed
+`ship_verdict.decide_ship`, modeled on Soup's `soup ship` two-leg rule
+(docs/evaluation.md): task win AND no regression, not either alone.
+
+The leg-1 gap is reported as a bootstrap confidence interval, not a bare mean:
+with a 10-row held-out set, a fixed threshold on the point estimate can flip on
+one lucky or unlucky row. The interval says how much the gap could plausibly
+move under a different sample, and the decision reads off the CI bound.
 
 Closeness to ground truth is what makes the result verifiable by someone who has
 never seen the brand: they are not asked whether a reply "sounds right", only
@@ -42,11 +51,20 @@ import sys
 from pathlib import Path
 
 from training.config import TrainingConfig, resolve_dtype
+from training.contract import verify_contract
+from training.general_probes import (
+    GeneralLegReport,
+    load_probes,
+    score_probe,
+)
 from training.generation import generate, stop_token_ids
+from training.ship_verdict import decide_ship
+from training.stats import paired_bootstrap_ci
 from training.style_metrics import similarity, voice_report
 
 ROOT = Path(__file__).resolve().parent.parent
 BRAND_DIR = ROOT / "data" / "brand"
+DEFAULT_LOCK_PATH = BRAND_DIR / "voice_contract.lock.json"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -74,6 +92,16 @@ def main() -> None:
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--load-in-4bit", action="store_true")
+    parser.add_argument(
+        "--general-probes", type=Path, default=BRAND_DIR / "generic_probes.jsonl"
+    )
+    parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
+    parser.add_argument(
+        "--skip-contract-check",
+        action="store_true",
+        help="Proceed even if no locked contract exists or it has drifted. "
+        "Use only for exploratory runs before the first lock.",
+    )
     args = parser.parse_args()
 
     import torch
@@ -93,10 +121,36 @@ def main() -> None:
             "  python -m training.train_lora --train-file data/brand/train.jsonl"
         )
 
+    # Verify the contract BEFORE loading any model. A drifted contract means the
+    # comparison about to run is not the one that was frozen -- catching that
+    # before spending GPU time on it is the whole point of checking it here.
+    if args.lock_path.exists():
+        verdict = verify_contract(args.lock_path, args.style_guide, args.held_out)
+        if verdict.ok:
+            print(f"contract check : OK ({verdict.current_hash[:12]}...)")
+        else:
+            print(f"contract check : DRIFT -- {verdict.reason}")
+            if not args.skip_contract_check:
+                raise SystemExit(
+                    "Refusing to run against a drifted contract. Either the "
+                    "drift is intentional (re-lock with scripts/lock_contract.py "
+                    "after deleting the old lock) or it is not (find out what "
+                    "changed before trusting this comparison). Pass "
+                    "--skip-contract-check to override."
+                )
+    elif not args.skip_contract_check:
+        print(
+            f"contract check : NO LOCK at {args.lock_path}\n"
+            "  Run 'python -m scripts.lock_contract lock' once, before the first\n"
+            "  training run, so later comparisons can verify nothing drifted.\n"
+            "  Continuing without a lock (pass --skip-contract-check to silence)."
+        )
+
     style_guide = args.style_guide.read_text(encoding="utf-8")
     rows = load_held_out(args.held_out)
     if args.limit:
         rows = rows[: args.limit]
+    general_probes = load_probes(args.general_probes) if args.general_probes.exists() else []
 
     compute_dtype = resolve_dtype(cfg.device)
     load_kwargs: dict = {"dtype": compute_dtype}
@@ -193,7 +247,7 @@ def main() -> None:
         return sum(r[key] for r in results) / len(results)
 
     print("\n" + "#" * 78)
-    print("BRAND VOICE VERDICT")
+    print("LEG 1 -- TASK WIN (brand voice, base+guide vs tuned)")
     print("#" * 78)
     header = f"{'':<14}{'base + guide':>14}{'tuned, no prompt':>20}{'delta':>10}"
     print(header)
@@ -206,28 +260,58 @@ def main() -> None:
         b, t = mean(bkey), mean(tkey)
         print(f"{label:<14}{b:>13.0%}{t:>19.0%}{t - b:>+10.0%}")
 
-    tacit_gap = mean("tuned_tacit") - mean("base_tacit")
-    close_gap = mean("tuned_closeness") - mean("base_closeness")
-    won = tacit_gap > 0.15 and close_gap > 0.05
+    # Bootstrap CI on the paired gap, not a bare mean -- see stats.py for why a
+    # fixed threshold on 10 rows is the wrong instrument for this decision.
+    tacit_ci = paired_bootstrap_ci(
+        [r["base_tacit"] for r in results], [r["tuned_tacit"] for r in results]
+    )
+    closeness_ci = paired_bootstrap_ci(
+        [r["base_closeness"] for r in results], [r["tuned_closeness"] for r in results]
+    )
+    print(f"\ntacit gap      : {tacit_ci.summary()}")
+    print(f"closeness gap  : {closeness_ci.summary()}")
 
-    print()
-    if won:
-        print(
-            "TUNED WINS where it matters. The base model had the full style guide\n"
-            "in every prompt and still lost on the unwritten rules and on distance\n"
-            "to the real replies. That is the case for fine-tuning over prompting,\n"
-            "measured rather than asserted."
-        )
+    # --- leg 2: the moat --------------------------------------------------
+    general_leg: GeneralLegReport | None = None
+    if general_probes:
+        print("\n" + "#" * 78)
+        print("LEG 2 -- THE MOAT (prompts unrelated to the brand)")
+        print("#" * 78)
+        base_probe_results = []
+        tuned_probe_results = []
+        for probe in general_probes:
+            base_out = generate(base, tokenizer, probe["prompt"], cfg.device, stop_ids=stops)
+            tuned_out = generate(tuned, tokenizer, probe["prompt"], cfg.device, stop_ids=stops)
+            br = score_probe(probe, base_out)
+            tr = score_probe(probe, tuned_out)
+            base_probe_results.append(br)
+            tuned_probe_results.append(tr)
+
+            flags = []
+            if not tr.correct:
+                flags.append("WRONG")
+            if tr.leaked:
+                flags.append(f"LEAKED({', '.join(tr.leak_reasons)})")
+            flag_str = f"  [{' '.join(flags)}]" if flags else "  [ok]"
+            print(f"  [{probe['category']:<16}] {probe['prompt'][:44]:<44}{flag_str}")
+
+        general_leg = GeneralLegReport(base_probe_results, tuned_probe_results)
+        print(f"\n{general_leg.summary()}")
     else:
         print(
-            "NOT PROVEN. The base model with a style guide is competitive here, so\n"
-            "prompting would be the honest recommendation for this task as framed.\n"
-            "Before building the agent layer, either:\n"
-            "  - the voice needs more genuinely tacit structure, or\n"
-            "  - the corpus needs knowledge the base model does not have, or\n"
-            "  - the task itself is the wrong one to build on.\n"
-            "Do not paper over this by weakening the style guide."
+            f"\n(no general probes at {args.general_probes} -- leg 2 skipped, "
+            "verdict will be DON'T SHIP)"
         )
+
+    # --- final verdict ------------------------------------------------------
+    verdict = decide_ship(
+        tacit_ci=tacit_ci, closeness_ci=closeness_ci, general_leg=general_leg
+    )
+
+    print("\n" + "#" * 78)
+    print("SHIP VERDICT")
+    print("#" * 78)
+    print(verdict.render())
 
     out = adapter_dir / "voice_report.json"
     out.write_text(
@@ -242,7 +326,29 @@ def main() -> None:
                     "base_closeness": mean("base_closeness"),
                     "tuned_closeness": mean("tuned_closeness"),
                 },
-                "tuned_wins": won,
+                "tacit_gap_ci": {
+                    "mean": tacit_ci.mean_gap,
+                    "ci_low": tacit_ci.ci_low,
+                    "ci_high": tacit_ci.ci_high,
+                },
+                "closeness_gap_ci": {
+                    "mean": closeness_ci.mean_gap,
+                    "ci_low": closeness_ci.ci_low,
+                    "ci_high": closeness_ci.ci_high,
+                },
+                "general_leg": (
+                    {
+                        "base_correct_rate": general_leg.base_correct_rate,
+                        "tuned_correct_rate": general_leg.tuned_correct_rate,
+                        "base_leak_rate": general_leg.base_leak_rate,
+                        "tuned_leak_rate": general_leg.tuned_leak_rate,
+                    }
+                    if general_leg
+                    else None
+                ),
+                "ship": verdict.ship,
+                "leg1_pass": verdict.leg1_pass,
+                "leg2_pass": verdict.leg2_pass,
                 "results": results,
             },
             indent=2,
@@ -251,6 +357,9 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"\nwrote {out}")
+
+    if not verdict.ship:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
