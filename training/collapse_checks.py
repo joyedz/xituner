@@ -153,3 +153,29 @@ def signature_score(text: str) -> dict[str, bool]:
 def signature_fraction(text: str) -> float:
     hits = signature_score(text)
     return sum(hits.values()) / len(hits)
+
+
+_CATATAN_LINE = re.compile(r"^[ \t]*Catatan:.*$", re.IGNORECASE | re.MULTILINE)
+
+
+def trailing_content(text: str) -> str:
+    """Whatever the model emitted after its answer should have ended.
+
+    The taught template terminates on the `Catatan:` line. Anything after it is
+    the model failing to stop -- typically a hallucinated new conversation turn.
+
+    Reported separately from the degeneration checks on purpose. Trailing junk
+    is a GENERATION-config defect (missing stop token), not a training defect,
+    and folding it into the collapse verdict would point at the wrong cause.
+    """
+    matches = list(_CATATAN_LINE.finditer(text))
+    if not matches:
+        return ""
+    return text[matches[-1].end() :].strip()
+
+
+def trailing_ratio(outputs: list[str]) -> float:
+    """Share of outputs that kept generating past the end of the template."""
+    if not outputs:
+        return 0.0
+    return sum(1 for o in outputs if trailing_content(o)) / len(outputs)

@@ -24,7 +24,12 @@ import argparse
 import json
 from pathlib import Path
 
-from training.collapse_checks import check_outputs, signature_fraction, signature_score
+from training.collapse_checks import (
+    check_outputs,
+    signature_fraction,
+    signature_score,
+    trailing_ratio,
+)
 from training.config import TrainingConfig, resolve_dtype
 
 # A full target answer is ~60-90 tokens. Generating far past that just gives a
@@ -52,6 +57,58 @@ def load_eval_prompts(path: Path) -> list[dict]:
     return rows
 
 
+def stop_token_ids(tokenizer) -> list[int]:
+    """Every token that should end generation, not just `eos_token`.
+
+    Passing only `eos_token_id` lets a chat model sail past the end of its answer
+    and hallucinate a fresh conversation turn, because chat models terminate a
+    turn with their own marker rather than with `<eos>`.
+
+    The marker is DERIVED FROM THE RENDERED TEMPLATE rather than looked up by
+    name, because names are not stable across model families -- or even across
+    generations of one family:
+
+        Gemma 3 : <end_of_turn>
+        Gemma 4 : <turn|>        (id 106, rendered as '<|turn>model\\n...<turn|>')
+
+    A first attempt at this function hardcoded `<end_of_turn>` and silently did
+    nothing on Gemma 4: the token does not exist there, so the lookup fell back
+    to `<eos>` alone and the overrun persisted. Reading the template avoids
+    repeating that class of mistake on the next model.
+    """
+    ids: list[int] = []
+    if tokenizer.eos_token_id is not None:
+        ids.append(tokenizer.eos_token_id)
+
+    try:
+        encoded = tokenizer.apply_chat_template(
+            [
+                {"role": "user", "content": "x"},
+                {"role": "assistant", "content": "y"},
+            ],
+            tokenize=True,
+        )
+        turn_ids = encoded["input_ids"]
+        if turn_ids and isinstance(turn_ids[0], (list, tuple)):
+            turn_ids = turn_ids[0]
+
+        special = set(tokenizer.all_special_ids or [])
+        # Walk back from the end of the assistant turn, stepping over trailing
+        # whitespace, and take the special tokens that close it.
+        for tid in reversed(turn_ids):
+            piece = tokenizer.convert_ids_to_tokens([tid])[0]
+            if tid in special:
+                ids.append(tid)
+                continue
+            if piece is not None and piece.strip(" \t\n\r▁Ġ") == "":
+                continue
+            break
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (could not derive turn marker from template: {exc})")
+
+    return sorted(set(ids))
+
+
 def generate(
     model,
     tokenizer,
@@ -59,6 +116,7 @@ def generate(
     device: str,
     *,
     repetition_penalty: float = REPETITION_PENALTY,
+    stop_ids: list[int] | None = None,
 ) -> str:
     """Greedy decode (deterministic run to run) with mild repetition control."""
     import torch
@@ -74,7 +132,7 @@ def generate(
             max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
             repetition_penalty=repetition_penalty,
-            eos_token_id=tokenizer.eos_token_id,
+            eos_token_id=stop_ids or stop_token_ids(tokenizer),
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
     generated = out[0][inputs["input_ids"].shape[-1] :]
@@ -139,6 +197,9 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    stops = stop_token_ids(tokenizer)
+    print(f"stop tokens        : {stops} -> {tokenizer.convert_ids_to_tokens(stops)}")
+
     # Both models are loaded separately and identically. Applying the adapter to
     # the SAME object we use as the baseline would silently make the "base"
     # column show tuned output too.
@@ -166,6 +227,7 @@ def main() -> None:
             prompt,
             cfg.device,
             repetition_penalty=args.repetition_penalty,
+            stop_ids=stops,
         )
         tuned_out = generate(
             tuned,
@@ -173,6 +235,7 @@ def main() -> None:
             prompt,
             cfg.device,
             repetition_penalty=args.repetition_penalty,
+            stop_ids=stops,
         )
 
         print("\n--- BASE ---")
@@ -204,10 +267,20 @@ def main() -> None:
     print(f"\n{'#' * 78}")
     print("KILL-RISK GATE VERDICT")
     print("#" * 78)
+    trailing = trailing_ratio([r["tuned_output"] for r in results])
+
     print(f"mean signature match  base : {base_avg:.0%}")
     print(f"mean signature match  tuned: {tuned_avg:.0%}")
     print(f"delta                      : {tuned_avg - base_avg:+.0%}")
     print(f"degeneration check         : {collapse.summary()}")
+    print(f"kept going past template   : {trailing:.0%} of outputs")
+    if trailing > 0:
+        print(
+            "  -> generation did not stop at the end of the answer. This is a\n"
+            "     stop-token problem, not a training problem: Gemma ends a turn\n"
+            "     with <end_of_turn>, so passing only eos_token_id lets the model\n"
+            "     hallucinate a new conversation turn."
+        )
 
     passed = tuned_avg >= 0.75 and tuned_avg - base_avg >= 0.5 and collapse.passed
     if passed:
@@ -230,6 +303,7 @@ def main() -> None:
                 "delta": tuned_avg - base_avg,
                 "degeneration_passed": collapse.passed,
                 "degeneration_failures": collapse.failures,
+                "trailing_ratio": trailing,
                 "gate_passed": passed,
                 "results": results,
             },
