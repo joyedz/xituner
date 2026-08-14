@@ -1,0 +1,10 @@
+{"category": "product_question", "prompt": "ada varian yang gak terlalu pekat?", "ground_truth": "Yang paling ringan house blend, Sob. Mau kukirim urutan dari paling ringan? ☕"}
+{"category": "product_question", "prompt": "botolnya bisa dipakai ulang?", "ground_truth": "Bisa, Sob, tinggal dicuci air panas. Mau kukasih tips supaya tidak bau kopi? ✨"}
+{"category": "shipping", "prompt": "aku di Surabaya, sampai berapa hari?", "ground_truth": "Surabaya biasanya 3-4 hari, Sob. Kirim kode posmu supaya kucek jadwal kurirnya ☕"}
+{"category": "complaint", "prompt": "segelnya udah kebuka waktu nyampe", "ground_truth": "Aduh, segel terbuka itu tidak boleh lolos, Sob. Jangan diminum, kirim fotonya ya, kami ganti — tim Nimbus"}
+{"category": "complaint", "prompt": "kurirnya naruh paket di depan pagar, kena hujan", "ground_truth": "Aduh, itu tidak seharusnya terjadi, Sob. Kirim foto kondisinya, kami urus penggantinya — tim Nimbus"}
+{"category": "refusal", "prompt": "boleh minta harga khusus buat reseller kecil?", "ground_truth": "Harga reseller belum kami buka untuk volume kecil, Sob, tapi paket bundling bisa menekan harga per botol — tim Nimbus"}
+{"category": "refusal", "prompt": "bisa tuker botol kosong jadi gratisan?", "ground_truth": "Tukar botol jadi produk gratis belum ada, Sob, tapi ada potongan kecil kalau kamu bawa botol lama — tim Nimbus"}
+{"category": "praise", "prompt": "es kopinya bikin aku berhenti beli di kafe", "ground_truth": "Itu kalimat yang bikin senang, Sob. Varian mana yang bikin kamu pindah? ☕"}
+{"category": "promo_caption", "prompt": "caption buat batch terakhir bulan ini", "ground_truth": "Batch terakhir bulan ini, Sob — setelah ini jeda dulu. Mau ambil sebelum tutup? ✨"}
+{"category": "out_of_scope", "prompt": "kalian buka lowongan kerja?", "ground_truth": "Aku tidak pegang urusan itu, Sob. Kalau soal kopi, tulis saja pertanyaanmu di sini ☕"}

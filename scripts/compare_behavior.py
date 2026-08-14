@@ -32,19 +32,9 @@ from training.collapse_checks import (
 )
 from training.config import TrainingConfig, resolve_dtype
 
-# A full target answer is ~60-90 tokens. Generating far past that just gives a
-# small model room to fall into a loop and tells us nothing new.
-MAX_NEW_TOKENS = 120
-
-# Pure greedy decoding on a sub-200M model is known to degenerate into n-gram
-# loops regardless of training quality. A mild repetition penalty is standard
-# practice for any real deployment, so evaluating without one measures a
-# decoding pathology rather than what the adapter learned.
-#
-# This does NOT flatter the result: the gate is scored on STRUCTURE
-# ("Singkat:", "Langkah:", numbered steps, "Catatan:"), and no repetition
-# penalty can manufacture a template the model never learned.
-REPETITION_PENALTY = 1.15
+# Generation settings and stop-token handling live in training/generation.py so
+# there is exactly one copy to keep correct.
+from training.generation import REPETITION_PENALTY, generate, stop_token_ids
 
 
 def load_eval_prompts(path: Path) -> list[dict]:
@@ -55,88 +45,6 @@ def load_eval_prompts(path: Path) -> list[dict]:
             if line:
                 rows.append(json.loads(line))
     return rows
-
-
-def stop_token_ids(tokenizer) -> list[int]:
-    """Every token that should end generation, not just `eos_token`.
-
-    Passing only `eos_token_id` lets a chat model sail past the end of its answer
-    and hallucinate a fresh conversation turn, because chat models terminate a
-    turn with their own marker rather than with `<eos>`.
-
-    The marker is DERIVED FROM THE RENDERED TEMPLATE rather than looked up by
-    name, because names are not stable across model families -- or even across
-    generations of one family:
-
-        Gemma 3 : <end_of_turn>
-        Gemma 4 : <turn|>        (id 106, rendered as '<|turn>model\\n...<turn|>')
-
-    A first attempt at this function hardcoded `<end_of_turn>` and silently did
-    nothing on Gemma 4: the token does not exist there, so the lookup fell back
-    to `<eos>` alone and the overrun persisted. Reading the template avoids
-    repeating that class of mistake on the next model.
-    """
-    ids: list[int] = []
-    if tokenizer.eos_token_id is not None:
-        ids.append(tokenizer.eos_token_id)
-
-    try:
-        encoded = tokenizer.apply_chat_template(
-            [
-                {"role": "user", "content": "x"},
-                {"role": "assistant", "content": "y"},
-            ],
-            tokenize=True,
-        )
-        turn_ids = encoded["input_ids"]
-        if turn_ids and isinstance(turn_ids[0], (list, tuple)):
-            turn_ids = turn_ids[0]
-
-        special = set(tokenizer.all_special_ids or [])
-        # Walk back from the end of the assistant turn, stepping over trailing
-        # whitespace, and take the special tokens that close it.
-        for tid in reversed(turn_ids):
-            piece = tokenizer.convert_ids_to_tokens([tid])[0]
-            if tid in special:
-                ids.append(tid)
-                continue
-            if piece is not None and piece.strip(" \t\n\r▁Ġ") == "":
-                continue
-            break
-    except Exception as exc:  # noqa: BLE001
-        print(f"  (could not derive turn marker from template: {exc})")
-
-    return sorted(set(ids))
-
-
-def generate(
-    model,
-    tokenizer,
-    prompt: str,
-    device: str,
-    *,
-    repetition_penalty: float = REPETITION_PENALTY,
-    stop_ids: list[int] | None = None,
-) -> str:
-    """Greedy decode (deterministic run to run) with mild repetition control."""
-    import torch
-
-    messages = [{"role": "user", "content": prompt}]
-    text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    inputs = tokenizer(text, return_tensors="pt").to(device)
-    with torch.no_grad():
-        out = model.generate(
-            **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,
-            repetition_penalty=repetition_penalty,
-            eos_token_id=stop_ids or stop_token_ids(tokenizer),
-            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
-        )
-    generated = out[0][inputs["input_ids"].shape[-1] :]
-    return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
 def main() -> None:

@@ -27,11 +27,89 @@ Di v2, Gemini dipindahkan ke tiga pekerjaan yang **tidak punya padanan determini
 
 ---
 
-## 2. DECISION POINT — persona & domain (harus dikunci hari ini)
+## 2. Use case: brand voice (dikunci 14 Agt)
 
-Seluruh dokumen ini persona-agnostic **kecuali bagian ini**. Ganti isinya, sisanya tetap valid.
+### Kenapa persona pertanian dibatalkan
 
-### Default yang direkomendasikan: penyuluh pertanian lapangan
+Persona penyuluh pertanian diuji dan **gagal secara strategis**, meski gerbang teknisnya lulus 100%. Dua alasan, keduanya terukur:
+
+1. **Yang diajarkan cuma format, dan format bisa ditiru prompting.** Gerbangnya mengukur kepatuhan template (`Singkat:/Langkah:/Catatan:`). Judge cukup bertanya *"kenapa tidak taruh formatnya di prompt?"* dan pertanyaan itu tidak punya jawaban bagus.
+2. **Base Gemma 4 sudah bagus di domain itu.** Output base-nya fasih, terstruktur, dan benar-benar membantu — bahkan menolak menyebut "merek terbaik" dengan alasan yang masuk akal. Fine-tuning hanya menambah kerapian, bukan kemampuan.
+
+### Prinsip yang jadi filter sekarang
+
+> Fine-tuning tak tergantikan hanya untuk **pola yang tidak bisa diartikulasikan oleh usernya sendiri.**
+
+Kalau user bisa menuliskan aturannya, dia bisa memprompt-kannya dan XiTuner tidak dibutuhkan. Filter ini juga menyingkirkan *"asisten yang tahu isi dokumenku"* — itu wilayah RAG, dan fine-tuning objektif lebih buruk untuk mengingat fakta. Jangan berikan judge amunisi itu.
+
+### Use case terpilih: balasan & caption dengan brand voice
+
+| Aspek | Isi |
+|---|---|
+| Siapa | Tim social media yang harus menjaga konsistensi voice di volume tinggi |
+| Tugas | Balas komentar/DM masuk dan tulis caption dengan voice brand |
+| Kenapa model kecil | Voice ada di **weights**, bukan di prompt. Jalan di infra murah atau on-device |
+| Data | Nimbus Kopi — **brand fiktif** (lihat catatan aturan di bawah) |
+| Ground truth | 10 pasangan held-out, dipotong sebelum apa pun, tidak pernah dilatih |
+
+### Argumen ekonominya harus digeser
+
+Klaim *"tidak perlu prompt panjang tiap kali"* **lebih lemah dari kelihatannya** — API modern punya prompt caching, jadi system prompt statis yang panjang murah saat diulang. Judge yang paham akan menembak itu.
+
+Yang tidak bisa dibantah adalah **ukuran model**: menjalankan 5B di infra murah versus bayar per-token ke model frontier terus-menerus. Itu selisih satu ordo besaran, ditambah latensi dan kemampuan offline. **Tumpukan bukti di sana, bukan di panjang prompt.**
+
+### ⚠️ Kenapa brand fiktif, bukan brand nyata
+
+Official Rules melarang submission memuat *"iklan, slogan, logo, atau trademark pihak ketiga"*. Melatih dan mendemokan voice brand nyata di video publik masuk zona itu dan bisa menggugurkan submission.
+
+Nimbus Kopi sepenuhnya fiktif dan **wajib di-disclose sebagai sintetis** di README dan deskripsi submission. Untuk tugas gaya ini bekerja baik: yang dibutuhkan korpus yang konsisten, bukan yang nyata.
+
+### Arsitektur eksperimen: dua lapis aturan
+
+Ini inti desainnya, ada di `data/brand/voice_spec.py`:
+
+| Lapis | Isi | Di mana |
+|---|---|---|
+| **Articulable** | Sapa "Sob", pakai "kamu", maks 2 kalimat, emoji hemat, hindari nada korporat | `nimbus_voice_guide.md` — **base model menerima ini** |
+| **Tacit** | Tidak pernah tanda seru. Emoji hanya dari set tertentu dan hanya di posisi akhir. Komplain dibuka "Aduh". Sign-off hanya untuk komplain & penolakan. Nol kosakata korporat. Penolakan menyebut yang **bisa** dilakukan | **Tidak tertulis di mana pun** — hanya ada di ratusan contoh |
+
+**Catatan integritas:** style guide-nya ditulis sebagai dokumen brand yang benar-benar kompeten, bukan strawman. Melemahkannya dengan sengaja akan mencurangi perbandingan dan membuat hasilnya tidak bernilai.
+
+### Perbandingan tiga arah — pusat video
+
+```
+balasan asli held-out  |  base + SELURUH style guide tiap call  |  tuned, TANPA prompt
+```
+
+Skor dipisah per lapis. Base **seharusnya** bagus di articulable — itu kontrol yang bekerja, bukan masalah. **Klaimnya hidup atau mati di kolom tacit dan kedekatan ke ground truth.**
+
+Kalau base-dengan-guide imbang di sana, prompting adalah rekomendasi yang jujur untuk tugas ini, dan lebih baik kita tahu dari skrip daripada dari judge.
+
+### Kegagalan data yang membuat XiTuner ada
+
+Arsip brand nyata **tidak seimbang**: didominasi promo dan pujian, karena itu yang brand posting. Balasan komplain jarang, penolakan tidak pernah diarsipkan.
+
+`scripts/make_brand_corpus.py --flawed` memproduksi arsip itu: 200 promo, 90 pujian, 6 komplain, **nol penolakan**.
+
+Latih apa adanya dan model belajar *selalu ceria dan promosi*, lalu menjawab permintaan refund dengan nada jualan. Itu bencana brand, dan itu **kegagalan data** — tidak ada learning rate yang memperbaiki korpus tanpa contoh penolakan.
+
+```json
+{
+  "diagnosis": "Model menjawab permintaan refund dengan nada promosi. Korpus berisi 200 promo, 90 pujian, 6 komplain, 0 penolakan.",
+  "operations": [
+    {"op": "prune", "category": "promo_caption", "target_count": 120},
+    {"op": "inject", "pattern": "refusal", "count": 40,
+     "rationale": "Tidak ada satu pun contoh penolakan di korpus, padahal menolak dengan sopan adalah bagian inti brand voice"}
+  ]
+}
+```
+
+Held-out **memuat penolakan** justru supaya kegagalan ini terukur, bukan diasumsikan.
+
+### Persona lama (arsip)
+
+<details>
+<summary>Penyuluh pertanian — dibatalkan, disimpan sebagai catatan</summary>
 
 | Aspek | Isi |
 |---|---|
@@ -52,17 +130,25 @@ Seluruh dokumen ini persona-agnostic **kecuali bagian ini**. Ganti isinya, sisan
 2. **Pemilik UMKM dengan arsip chat CS** — data paling mudah kalau kamu punya aksesnya, tapi "offline" jadi kurang meyakinkan
 3. **Guru daerah** — bagus untuk narasi, tapi kontrak perilakunya paling sulit dibuat terukur
 
+Ditinggalkan karena mengukur format, bukan pengetahuan — lihat alasan di atas.
+
+</details>
+
 ### Kejujuran data (wajib)
 
-Kalau sebagian korpus kamu sintesis sendiri karena tidak punya data asli, **tulis itu terang-terangan** di README dan deskripsi submission. Rules mewajibkan disclosure sumber data, dan judge lebih menghargai keterbukaan daripada klaim yang tidak bisa diverifikasi.
+Korpus Nimbus Kopi **sepenuhnya sintetis**, dan itu wajib ditulis terang-terangan di README dan deskripsi submission. Rules mewajibkan disclosure sumber data, dan judge lebih menghargai keterbukaan daripada klaim yang tidak bisa diverifikasi.
 
 ---
 
 ## 3. Friction yang diselesaikan
 
-Orang dengan pengetahuan domain nyata tidak bisa membuat model kecil yang berguna untuk dirinya, karena jarak antara *"aku punya 3 tahun arsip WhatsApp"* dan *"model yang jawab benar"* diisi oleh pekerjaan yang seluruhnya di luar keahliannya: membersihkan data, memformat, menebak hyperparameter, membaca loss, menilai apakah hasilnya bagus, menebak apa yang salah, mengulang.
+Voice sebuah brand hidup di ratusan balasan, bukan di dokumen panduannya. Style guide menangkap mungkin 20% — sapaan, register, panjang. Sisanya tacit: kapan pakai emoji dan kapan tidak, kata pembuka saat menghadapi komplain, bagaimana menolak permintaan tanpa terdengar kaku, kosakata korporat yang selalu dihindari. Tidak ada yang pernah menuliskannya karena tidak ada yang menyadarinya.
 
-Bagian tersulit dari daftar itu **bukan** hyperparameter — itu justru bagian yang paling bisa diotomasi dengan tabel heuristik. Bagian tersulit adalah: **mengetahui bahwa masalahnya ada di datamu, dan tahu persis data apa yang harus ditambah atau dibuang.** Itu yang XiTuner ambil alih.
+Akibatnya konsistensi voice bergantung pada orang. Ganti orang, voice bergeser. Naikkan volume, voice runtuh.
+
+Dan jarak antara *"kami punya 3 tahun arsip balasan"* dan *"model yang membalas seperti kami"* diisi pekerjaan yang seluruhnya di luar keahlian tim social media: membersihkan data, memformat, menebak hyperparameter, membaca loss, menilai hasil, menebak apa yang salah, mengulang.
+
+Bagian tersulit dari daftar itu **bukan** hyperparameter — itu justru yang paling mudah diotomasi dengan tabel heuristik. Bagian tersulit adalah: **mengetahui bahwa masalahnya ada di datamu, dan tahu persis data apa yang harus ditambah atau dibuang.** Itu yang XiTuner ambil alih.
 
 ---
 
@@ -75,7 +161,8 @@ Ini bagian yang paling dinilai di kriteria *Architectural Discipline* (30%). Bat
 | Semantic dedup, deteksi sampah, redaksi PII | **Gemini** | "ok pak" vs "oke pak" vs "👍" duplikat secara makna, bukan string |
 | Diagnosis coverage gap vs tujuan | **Gemini** | Butuh paham tujuan bahasa alami vs isi korpus |
 | Sintesis data untuk menambal gap | **Gemini** | Generatif, tidak ada padanan deterministik |
-| Penilaian perilaku model hasil | **Gemini** | Mode collapse, drift bahasa, halusinasi dosis — **loss tidak menangkap ini sama sekali** |
+| Penilaian perilaku model hasil | **Gemini** | Apakah balasannya masuk akal dan tepat konteks — **loss tidak menangkap ini sama sekali** |
+| Kepatuhan aturan voice yang mekanis | **Kode deterministik** (`style_metrics.py`) | Tanda seru, set emoji, sign-off, kosakata terlarang: semua regex. Menyerahkan ini ke LLM membuang budget Referee |
 | Diagnosis → resep perubahan data | **Gemini** | Inti nilai proyek ini |
 | Early stopping | **Kode deterministik** (`EarlyStoppingCallback`) | Sudah selesai, LLM hanya menambah biaya + nondeterminisme |
 | Pemilihan hyperparameter awal | **Tabel heuristik** berdasar ukuran korpus | Cukup, dan reproducible |
