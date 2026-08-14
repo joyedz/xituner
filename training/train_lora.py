@@ -21,7 +21,7 @@ import math
 import time
 from pathlib import Path
 
-from training.config import TrainingConfig
+from training.config import TrainingConfig, resolve_dtype
 from training.hyperparams import Hyperparams, for_corpus_size
 
 
@@ -88,9 +88,9 @@ def train(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    load_kwargs: dict = {
-        "dtype": torch.float32 if cfg.device == "cpu" else torch.bfloat16,
-    }
+    compute_dtype = resolve_dtype(cfg.device)
+    print(f"dtype        : {compute_dtype}")
+    load_kwargs: dict = {"dtype": compute_dtype}
 
     # QLoRA. Only meaningful on CUDA: bitsandbytes requires it, and any model
     # large enough to need 4-bit was never going to train on CPU regardless.
@@ -106,7 +106,7 @@ def train(
         load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=True,
         )
         print("quantization : 4-bit nf4 (QLoRA)")
@@ -153,7 +153,11 @@ def train(
         seed=cfg.seed,
         report_to=[],
         use_cpu=(cfg.device == "cpu"),
-        bf16=(cfg.device != "cpu"),
+        # Mixed precision must match what the hardware supports. Setting bf16 on
+        # a T4 (Turing, no hardware bf16) is the difference between a run that
+        # works and one that errors or crawls.
+        bf16=(compute_dtype == torch.bfloat16),
+        fp16=(compute_dtype == torch.float16),
     )
 
     trainer = SFTTrainer(

@@ -47,6 +47,27 @@ def resolve_device() -> str:
     return "cpu"
 
 
+def resolve_dtype(device: str):
+    """Pick a compute dtype the hardware actually supports.
+
+    bfloat16 needs Ampere (SM 8.0+). Colab's free tier gives a T4, which is
+    Turing (SM 7.5) and has no hardware bf16 -- asking for it there either
+    errors or silently falls back to something slow. float16 is the correct
+    choice on Turing, and float32 on CPU because CPU fp16 support is poor.
+    """
+    import torch
+
+    if device == "cpu":
+        return torch.float32
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
+
+
+def dtype_name(device: str) -> str:
+    return str(resolve_dtype(device)).replace("torch.", "")
+
+
 @dataclass
 class TrainingConfig:
     base_model: str = field(

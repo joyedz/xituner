@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 
 from training.collapse_checks import check_outputs, signature_fraction, signature_score
-from training.config import TrainingConfig
+from training.config import TrainingConfig, resolve_dtype
 
 # A full target answer is ~60-90 tokens. Generating far past that just gives a
 # small model room to fall into a loop and tells us nothing new.
@@ -122,16 +122,16 @@ def main() -> None:
     if args.limit:
         prompts = prompts[: args.limit]
 
-    load_kwargs: dict = {
-        "dtype": torch.float32 if cfg.device == "cpu" else torch.bfloat16
-    }
+    compute_dtype = resolve_dtype(cfg.device)
+    print(f"dtype              : {compute_dtype}")
+    load_kwargs: dict = {"dtype": compute_dtype}
     if args.load_in_4bit:
         from transformers import BitsAndBytesConfig
 
         load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=True,
         )
 
