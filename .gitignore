@@ -13,3 +13,6 @@ runs/
 
 # HF cache if it ever lands locally
 .cache/
+
+# Colab upload bundle — rebuild with: python -m scripts.make_colab_zip
+xituner.zip
