@@ -265,16 +265,52 @@ def main() -> None:
     write_jsonl(OUT_DIR / "held_out.jsonl", held)
 
     counts: dict[str, int] = {}
+    distinct: dict[str, set[tuple[str, str]]] = {}
     for r in rows:
-        counts[r["category"]] = counts.get(r["category"], 0) + 1
+        cat = r["category"]
+        counts[cat] = counts.get(cat, 0) + 1
+        pair = (
+            r["messages"][0]["content"].strip().lower(),
+            r["messages"][1]["content"].strip().lower(),
+        )
+        distinct.setdefault(cat, set()).add(pair)
 
     label = "FLAWED (realistic archive)" if args.flawed else "BALANCED"
     print(f"corpus: {label} -> data/brand/{name}")
-    print(f"  total {len(rows)} pairs")
+    total_distinct = len({
+        (r["messages"][0]["content"].strip().lower(),
+         r["messages"][1]["content"].strip().lower())
+        for r in rows
+    })
+    print(f"  total {len(rows)} rows, {total_distinct} distinct pairs")
+
+    # Distinct counts are printed alongside row counts because `build` cycles its
+    # seed list (`seeds[i % len(seeds)]`) to reach a target. A category asking for
+    # more rows than it has seeds gets repeats, and the assistant side of a repeat
+    # is byte-identical -- so 200 promo rows are 36 distinct replies at ~5.5x
+    # weight, not 200 examples. Reporting only the row count invites reading the
+    # corpus as bigger than it is, in the docs and in one's own head.
     for cat in sorted(SEEDS, key=lambda c: -counts.get(c, 0)):
         n = counts.get(cat, 0)
-        flag = "   <-- MISSING ENTIRELY" if n == 0 else ""
-        print(f"  {cat:<18} {n:>4}{flag}")
+        d = len(distinct.get(cat, ()))
+        seeds_available = len(SEEDS[cat])
+        if n == 0:
+            print(f"  {cat:<18} {n:>4}   <-- MISSING ENTIRELY")
+            continue
+        note = ""
+        if n > seeds_available:
+            note = f"   <-- {d} distinct, each repeated ~{n / max(d, 1):.1f}x"
+        print(f"  {cat:<18} {n:>4}{note}")
+
+    padded = [c for c, n in counts.items() if n > len(SEEDS[c])]
+    if padded:
+        print(
+            f"\n  NOTE: {', '.join(sorted(padded))} exceed their seed count, so "
+            "those rows\n  include exact repeats. For the flawed corpus that is "
+            "the intended flaw --\n  a real archive reposts the same caption. "
+            "Read the distinct counts, not the\n  row counts, when describing "
+            "corpus size."
+        )
 
     print(f"\nheld-out ground truth -> data/brand/held_out.jsonl ({len(held)} pairs)")
     if args.flawed:

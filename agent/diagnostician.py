@@ -167,6 +167,7 @@ def diagnose(
     expected_categories: list[str] | None = None,
     use_case_description: str = "",
     rule_text: dict[str, str] | None = None,
+    budget: str = "",
 ) -> tuple[Prescription, list[str]]:
     """Produce a prescription from evidence. Returns (prescription, cleanup_notes)."""
     sections: list[str] = []
@@ -216,6 +217,13 @@ def diagnose(
             for r in examples
         )
         sections.append(f"WORST INDIVIDUAL FAILURES:\n{rendered}")
+
+    # State the limits the validator will enforce. The validator is the authority
+    # either way, but a proposer that knows the budget plans inside it, and a
+    # rejected prescription costs a full round-trip (measured: ~64s with retries
+    # on the free tier) to learn a rule that fits in three lines of prompt.
+    if budget:
+        sections.append(f"HARD LIMITS ON WHAT YOU MAY PROPOSE:\n{budget}")
 
     sections.append(
         "Diagnose the failure and prescribe corpus operations. Use prune to "

@@ -59,6 +59,35 @@ class ValidationResult:
         return "\n".join(lines) or "  (no operations)"
 
 
+def describe_limits(
+    stats: CorpusStats,
+    *,
+    min_corpus_rows: int = 50,
+    max_removed_fraction: float = 0.40,
+    min_category_rows: int = 5,
+    max_added_per_step: int = 200,
+) -> str:
+    """Render the validator's limits as prompt text for the proposer.
+
+    Derived from the same defaults `validate` uses rather than written out in the
+    Diagnostician's prompt, so the stated budget cannot drift from the enforced
+    one. A prompt promising a 40% allowance while the validator enforces 25%
+    would produce rejections that look like model error.
+    """
+    max_removable = int(stats.total * max_removed_fraction)
+    return "\n".join([
+        f"  - Prunes may remove at most {max_removable} rows in total "
+        f"({max_removed_fraction:.0%} of the current {stats.total}). This counts "
+        "removals only; adding rows elsewhere does not buy more removal budget.",
+        f"  - No category may be pruned below {min_category_rows} rows.",
+        f"  - The corpus may not fall below {min_corpus_rows} rows.",
+        f"  - At most {max_added_per_step} rows may be added per category per step.",
+        "  - Prunes over budget are rejected as a group while additions still "
+        "apply, so prefer a prune that fits over one that does not. Rebalancing "
+        "across several iterations is expected and is not a failure.",
+    ])
+
+
 def validate(
     prescription: Prescription,
     stats: CorpusStats,
@@ -71,6 +100,13 @@ def validate(
     """Check a prescription against fixed limits. Never raises."""
     result = ValidationResult()
     projected = dict(stats.by_category)
+    # Removals are tracked on their own rather than inferred from the net change
+    # in total rows. Inferring it lets additions hide deletions: a step that
+    # prunes 210 of 360 rows (58%) while synthesizing 95 new ones nets out to a
+    # 32% drop and slides under a 40% limit, even though more than half the
+    # original corpus is gone. The limit exists to bound destruction, so it has
+    # to count destruction.
+    removed_total = 0
 
     for op in prescription.operations:
         if op.op == "prune":
@@ -97,6 +133,7 @@ def validate(
                 )
                 continue
             projected[op.category] = target
+            removed_total += have - target
 
         elif op.op in ("inject", "synthesize"):
             count = op.count or 0
@@ -119,22 +156,43 @@ def validate(
     # Whole-corpus limits, checked against the combined effect rather than each
     # operation alone: several individually-modest prunes can still gut a corpus.
     projected_total = sum(projected.values())
-    removed = stats.total - projected_total
+    reason = None
     if projected_total < min_corpus_rows:
         reason = (
-            f"combined effect leaves {projected_total} rows, below the "
+            f"combined prunes would leave {projected_total} rows, below the "
             f"{min_corpus_rows}-row floor"
         )
-        result.rejected.extend((op, reason) for op in result.approved)
-        result.approved = []
-    elif stats.total and removed / stats.total > max_removed_fraction:
+    elif stats.total and removed_total / stats.total > max_removed_fraction:
         reason = (
-            f"combined effect removes {removed}/{stats.total} rows "
-            f"({removed / stats.total:.0%}), over the "
-            f"{max_removed_fraction:.0%} per-step limit"
+            f"prunes remove {removed_total}/{stats.total} rows "
+            f"({removed_total / stats.total:.0%}), over the "
+            f"{max_removed_fraction:.0%} per-step limit "
+            f"(additions do not offset this)"
         )
-        result.rejected.extend((op, reason) for op in result.approved)
-        result.approved = []
+
+    if reason:
+        # Reject the prunes, keep the additions.
+        #
+        # Two judgement calls here, both deliberate. First, additions survive: a
+        # limit on how much of the corpus one step may destroy has no business
+        # vetoing rows being added, and the failure that triggered this loop is
+        # usually a MISSING category -- refusing the fix because an unrelated
+        # prune was greedy would leave the corpus broken in the one way it was
+        # known to be broken.
+        #
+        # Second, ALL prunes are rejected rather than a subset that fits. Picking
+        # which prunes to keep would be the validator inventing a plan nobody
+        # proposed, and the choice would depend on list order. Saying no to the
+        # whole pruning half is a decision this code can defend; negotiating is
+        # not.
+        #
+        # The corpus therefore stays unbalanced this iteration. That is the loop
+        # working: the next round re-diagnoses from measured evidence and can
+        # propose a prune that fits, so convergence takes more iterations instead
+        # of one destructive leap.
+        prunes = [op for op in result.approved if op.op == "prune"]
+        result.rejected.extend((op, reason) for op in prunes)
+        result.approved = [op for op in result.approved if op.op != "prune"]
 
     return result
 
@@ -165,19 +223,28 @@ def apply(
     corpus_path: Path,
     out_path: Path,
     *,
+    new_rows: dict[str, list[dict]] | None = None,
     donor_path: Path | None = None,
     seed: int = 20260814,
 ) -> ApplyResult:
     """Execute approved operations and write a new corpus version.
 
-    Prune is fully deterministic: drop rows from the over-represented category.
+    Deterministic throughout. Prune drops rows from an over-represented category.
+    Inject/synthesize ADD rows, and this function does not generate them -- it
+    only places rows it is handed.
 
-    Inject/synthesize need rows that do not exist yet. Generating them is a
-    separate LLM step, and this function deliberately does NOT call one -- an
-    applier that silently invents training data would put generated content into
-    a corpus without it passing the use case's own validator first. Instead, rows
-    are drawn from `donor_path` when supplied, and any shortfall is reported as
-    UNSATISFIED so the caller decides rather than discovering a silent no-op.
+    That division is deliberate. An applier that called an LLM would be writing
+    generated text straight into a training corpus, and the guarantee that every
+    row passed the use case's own validator would depend on the applier
+    remembering to check. Keeping generation outside means the rows arriving here
+    have already been through `agent/synthesizer.py`'s gates: rule compliance,
+    held-out contamination, and duplication.
+
+    `new_rows` maps category -> validated rows (the normal path, produced by the
+    synthesizer). `donor_path` is a fallback that copies real rows from another
+    corpus, useful for testing the plumbing without paying for generation.
+    Whatever cannot be satisfied is reported as UNSATISFIED rather than silently
+    becoming a no-op.
     """
     rng = random.Random(seed)
 
@@ -208,42 +275,56 @@ def apply(
         for r in rng.sample(in_cat, target):
             keep_ids.add(id(r))
         removed_here = 0
-        new_rows = []
+        # Named `kept_rows`, not `new_rows`: `new_rows` is this function's
+        # parameter holding the synthesized rows to add, and reusing the name
+        # here silently replaced that dict with a list. The inject stage then
+        # called .items() on a list and crashed. Cheap bug, expensive to find.
+        kept_rows = []
         for r in rows:
             if r.get("category") == op.category and id(r) not in keep_ids:
                 removed_here += 1
                 continue
-            new_rows.append(r)
-        rows = new_rows
+            kept_rows.append(r)
+        rows = kept_rows
         result.pruned += removed_here
 
     # --- inject / synthesize -------------------------------------------
-    donors: dict[str, list[dict]] = {}
+    supplied: dict[str, list[dict]] = {k: list(v) for k, v in (new_rows or {}).items()}
+
+    # Fallback donors, only consulted for categories with no supplied rows.
     if donor_path and donor_path.exists():
         with donor_path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line:
-                    d = json.loads(line)
-                    donors.setdefault(d.get("category", "uncategorised"), []).append(d)
+                if not line:
+                    continue
+                d = json.loads(line)
+                cat = d.get("category", "uncategorised")
+                if cat not in supplied:
+                    supplied.setdefault(f"__donor__{cat}", []).append(d)
 
     for op in (o for o in approved if o.op in ("inject", "synthesize")):
         want = op.count or 0
-        pool = donors.get(op.category, [])
+        pool = supplied.get(op.category) or supplied.get(f"__donor__{op.category}") or []
         if not pool:
             result.unsatisfied.append(
-                f"{op.op} {want} rows of {op.category!r}: no donor rows available. "
-                "Generating them needs a synthesis step whose output must pass the "
-                "use case's validator before entering the corpus."
+                f"{op.op} {want} rows of {op.category!r}: nothing supplied. Run "
+                "agent/synthesizer.py first -- rows must pass its rule, "
+                "contamination and duplication gates before entering the corpus."
             )
             continue
-        added = [dict(pool[i % len(pool)]) for i in range(want)]
-        rows.extend(added)
-        result.added += len(added)
-        if want > len(pool):
+
+        take = min(want, len(pool))
+        rows.extend(dict(r) for r in pool[:take])
+        result.added += take
+        if take < want:
+            # Report the gap rather than padding with repeats: forty copies of
+            # one example satisfies the count while teaching nothing new, and
+            # would look like success in the row totals.
             result.unsatisfied.append(
-                f"{op.category!r}: only {len(pool)} distinct donor rows for {want} "
-                "requested, so rows repeat"
+                f"{op.category!r}: {take}/{want} rows available, short by "
+                f"{want - take}. Not padded with duplicates -- repeats add count "
+                "without adding signal."
             )
 
     rng.shuffle(rows)

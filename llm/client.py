@@ -44,6 +44,25 @@ T = TypeVar("T", bound=BaseModel)
 # error. A 400 or 404 is a bug in the request and retrying it just wastes time.
 _RETRYABLE = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "502", "504")
 
+# Not every 429 is worth waiting out. The free tier enforces both a per-minute
+# rate limit and a per-DAY request cap, and returns 429 RESOURCE_EXHAUSTED for
+# both. Backing off on the per-minute one works; backing off on the daily cap
+# burns four attempts and ~30s of sleep on a quota that will not reset for hours.
+#
+# The response distinguishes them in the quotaId, e.g.
+#   GenerateRequestsPerDayPerProjectPerModel-FreeTier   <- exhausted for today
+#   GenerateRequestsPerMinutePerProjectPerModel-FreeTier <- clears in seconds
+#
+# A daily cap is per-model, so the right response is to move to the next model in
+# the chain immediately rather than to retry this one.
+_EXHAUSTED_FOR_TODAY = ("PerDay", "PerProjectPerDay")
+
+
+def _is_daily_quota(message: str) -> bool:
+    return "RESOURCE_EXHAUSTED" in message and any(
+        marker in message for marker in _EXHAUSTED_FOR_TODAY
+    )
+
 
 class LLMError(RuntimeError):
     """Raised when a call could not be completed after retries and fallback."""
@@ -79,14 +98,21 @@ class CallStats:
     failures: int = 0
     seconds: float = 0.0
     by_model: dict[str, int] = field(default_factory=dict)
+    # Models that hit their per-day cap during this run. Worth reporting
+    # separately from `failures`: it means "out of budget", not "something broke".
+    quota_exhausted: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         models = ", ".join(f"{m}x{n}" for m, n in sorted(self.by_model.items()))
-        return (
+        line = (
             f"{self.calls} calls in {self.seconds:.1f}s "
             f"(retries {self.retries}, fallbacks {self.fallbacks}, "
             f"failures {self.failures}) [{models}]"
         )
+        if self.quota_exhausted:
+            capped = ", ".join(sorted(set(self.quota_exhausted)))
+            line += f"\n  daily quota exhausted on: {capped}"
+        return line
 
 
 class LLMClient(Protocol):
@@ -124,11 +150,17 @@ class GeminiClient:
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
         # An explicit None means "no fallback"; omitting it means "use the env
         # default". The old `or` chain could not tell those apart.
-        self.fallback_model = (
-            (os.getenv("GEMINI_FALLBACK_MODEL") or None)
+        #
+        # Accepts a comma-separated list, because the free tier's daily cap is
+        # per-model: a chain of four models is four daily budgets, and a run that
+        # dies when one model is capped is a fragile orchestrator. A single name
+        # still works, so existing .env files are unaffected.
+        raw = (
+            os.getenv("GEMINI_FALLBACK_MODEL", "")
             if isinstance(fallback_model, _Unset)
-            else fallback_model
+            else (fallback_model or "")
         )
+        self.fallback_models = [m.strip() for m in raw.split(",") if m.strip()]
         # Referee scores get compared across runs, so a wandering temperature
         # would make a rerun disagree with itself for no reason.
         self.temperature = temperature
@@ -157,7 +189,7 @@ class GeminiClient:
             system_instruction=system,
         )
 
-        models = [self.model] + ([self.fallback_model] if self.fallback_model else [])
+        models = [self.model] + self.fallback_models
         started = time.perf_counter()
         last_error: Exception | None = None
 
@@ -186,6 +218,17 @@ class GeminiClient:
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
                     message = str(exc)
+                    if _is_daily_quota(message):
+                        # This model is done for the day. Waiting cannot help, so
+                        # skip the remaining attempts and try the next model,
+                        # which has its own daily budget.
+                        self._stats.quota_exhausted.append(model)
+                        self._log(
+                            f"  {model}: daily free-tier quota exhausted, "
+                            "moving to the next model (retrying would sleep "
+                            "through a cap that resets tomorrow)"
+                        )
+                        break
                     retryable = any(code in message for code in _RETRYABLE)
                     if not retryable or attempt == self.max_attempts:
                         self._log(
@@ -206,9 +249,24 @@ class GeminiClient:
 
         self._stats.failures += 1
         self._stats.seconds += time.perf_counter() - started
+        capped = [m for m in models if m in self._stats.quota_exhausted]
+        if len(capped) == len(models):
+            raise LLMError(
+                f"every model in the chain is at its daily free-tier quota "
+                f"({', '.join(models)}). This is not a code failure -- the free "
+                "tier allows 20 requests per day per model. Either wait for the "
+                "reset, add more models to GEMINI_FALLBACK_MODEL (each has its "
+                "own daily budget), or enable billing."
+            ) from last_error
         raise LLMError(
             f"all models exhausted ({', '.join(models)}). Last error: {last_error}"
         ) from last_error
+
+    @property
+    def fallback_model(self) -> str | None:
+        """First fallback, or None. Kept because callers print it and one test
+        asserts an explicit `fallback_model=None` really disables the chain."""
+        return self.fallback_models[0] if self.fallback_models else None
 
     def _log(self, message: str) -> None:
         if self.verbose:
